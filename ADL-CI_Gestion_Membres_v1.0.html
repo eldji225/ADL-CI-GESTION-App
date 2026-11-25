@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADL-CI GESTION — Module de gestion des membres v1.0</title>
+<!--
+  ADL-CI GESTION — Module de gestion des membres v1.0
+  Association pour le Développement de Laabha — Section Côte d'Ivoire
+  Prototype autonome (suite de la pièce 6e : même serveur simulé, mêmes garanties).
+  Fonctionnalités : ajout, modification autorisée, fiche individuelle, recherche,
+  filtres tribu/statut, activation-désactivation, historique, export.
+  Règles : matricule ADLCI-AAAA-NNNN unique et jamais réutilisé, dédoublonnage,
+  historique complet des modifications, jamais de suppression définitive,
+  changements de statut soumis aux obligations déjà enregistrées.
+  Production visée (AT-1) : Node.js + Express / PostgreSQL / IndexedDB (Dexie).
+-->
+<style>
+:root{
+  --bg:#F6F3EC; --bg-soft:#EFEAE0; --bg-deep:#E7E1D3;
+  --primary:#2A4A3A; --primary-deep:#1D362B; --primary-soft:#3D6B54;
+  --accent:#C89F62; --accent-soft:#E9DBBE; --accent-faint:#F3ECD9;
+  --ink:#1C1B18; --ink-2:#4A473F; --ink-3:#7A7466;
+  --card:#FFFFFF; --line:#DCD5C6; --line-soft:#E8E2D4;
+  --ok:#2F7D4F; --ok-bg:#E6F1E9; --warn:#B97E1C; --warn-bg:#F7EEDC;
+  --danger:#A63D2F; --danger-bg:#F5E5E1; --info:#3E6C8E; --info-bg:#E4EDF3;
+  --shadow:0 1px 2px rgba(28,27,24,.06),0 4px 14px rgba(28,27,24,.08);
+  --shadow-lg:0 8px 30px rgba(28,27,24,.16);
+  --r:14px;
+  --f-title:'Lora',Georgia,serif; --f-ui:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --f-num:'IBM Plex Mono',ui-monospace,monospace;
+  --touch:44px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--f-ui);font-size:15px;line-height:1.55;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+button{font:inherit;cursor:pointer}
+input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3,h4{font-family:var(--f-title);font-weight:600;line-height:1.25;color:var(--primary)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px;border-radius:4px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.wrap{max-width:1180px;margin:0 auto;padding:22px 26px 80px}
+
+/* En-tête */
+.top{position:sticky;top:0;z-index:50;background:var(--primary);color:#fff;padding:12px 26px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.top .logo{display:flex;align-items:center;gap:11px}
+.top .logo img{width:38px;height:38px}
+.top b{font-family:var(--f-title);font-size:17px;letter-spacing:.04em;display:block}
+.top small{font-size:10.5px;color:rgba(255,255,255,.65);letter-spacing:.08em;text-transform:uppercase;display:block}
+.top .who{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:13px}
+.top .who .ava{width:36px;height:36px;border-radius:50%;background:var(--accent);color:var(--primary-deep);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
+.top .who b{font-size:13.5px;font-family:var(--f-ui)}
+.top .who small{font-size:10px;text-transform:none;letter-spacing:0;color:var(--accent)}
+.topnav{background:var(--primary-deep);padding:0 14px;display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.topnav button{flex-shrink:0;background:none;border:none;color:rgba(255,255,255,.78);padding:12px 15px;font-size:13.5px;font-weight:600;border-bottom:3px solid transparent;min-height:var(--touch)}
+.topnav button.on{color:#fff;border-bottom-color:var(--accent)}
+.topnav button:hover{color:#fff}
+.tab{display:none}
+.tab.on{display:block;animation:fadein .25s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* Composants */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:var(--touch);padding:0 17px;border-radius:11px;border:1px solid transparent;font-weight:600;font-size:14px;transition:background .15s}
+.btn.pri{background:var(--primary);color:#fff}.btn.pri:hover{background:var(--primary-deep)}
+.btn.gold{background:var(--accent);color:var(--primary-deep)}.btn.gold:hover{background:#B9905A}
+.btn.ghost{background:#fff;color:var(--primary);border-color:var(--line)}.btn.ghost:hover{background:var(--bg-soft)}
+.btn.danger{background:var(--danger);color:#fff}.btn.danger:hover{background:#8F3226}
+.btn.sm{min-height:36px;padding:0 12px;font-size:12.5px;border-radius:9px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.card .card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 20px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+.card .card-h h2{font-size:16.5px}
+.card .card-b{padding:18px 20px}
+.card .card-b.tight{padding:0}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}
+.note{display:flex;gap:11px;padding:13px 15px;border-radius:12px;font-size:13.5px;border:1px solid;align-items:flex-start}
+.note b{display:block;margin-bottom:2px}
+.note.ok{background:var(--ok-bg);border-color:#CBE3D2;color:#275E3D}
+.note.warn{background:var(--warn-bg);border-color:#EBD9B4;color:#7A5314}
+.note.err{background:var(--danger-bg);border-color:#E7C7BF;color:#7E2E22}
+.note.info{background:var(--info-bg);border-color:#C9DBE7;color:#2C4E66}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.tag.ok{background:var(--ok-bg);color:var(--ok)}
+.tag.warn{background:var(--warn-bg);color:var(--warn)}
+.tag.bad{background:var(--danger-bg);color:var(--danger)}
+.tag.info{background:var(--info-bg);color:var(--info)}
+.tag.neutral{background:var(--bg-deep);color:var(--ink-2)}
+.tag.gold{background:var(--accent-soft);color:#7A5A2B}
+.field{margin-bottom:13px}
+.field label{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:6px}
+.field input,.field select,.field textarea{width:100%;min-height:var(--touch);border:1px solid var(--line);border-radius:10px;padding:10px 13px;background:#fff;font-size:14.5px}
+.field textarea{min-height:76px;resize:vertical}
+.field .help{font-size:12px;color:var(--ink-3);margin-top:5px}
+.field.err input,.field.err select,.field.err textarea{border-color:var(--danger);background:var(--danger-bg)}
+.field .errmsg{font-size:12.5px;color:var(--danger);margin-top:5px;display:none}
+.field.err .errmsg{display:block}
+.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table.tbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:560px}
+.tbl th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:700;padding:10px 13px;border-bottom:1px solid var(--line);background:var(--bg-soft);white-space:nowrap}
+.tbl td{padding:10px 13px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl .num{font-family:var(--f-num);text-align:right;white-space:nowrap}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chips .btn.on{background:var(--primary);color:#fff;border-color:var(--primary)}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px 18px}
+.kpi .lab{font-size:12px;color:var(--ink-3);font-weight:600}
+.kpi .val{font-family:var(--f-num);font-size:25px;font-weight:600;color:var(--primary);margin-top:5px;font-variant-numeric:tabular-nums}
+.ava{width:38px;height:38px;border-radius:50%;background:var(--accent-soft);color:#7A5A2B;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0}
+.cell-name{display:flex;align-items:center;gap:11px;min-width:0}
+.cell-name .n b{display:block;font-size:13.5px;white-space:nowrap}
+.cell-name .n small{color:var(--ink-3);font-size:11.5px}
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:22px 0 16px}
+.head h1{font-size:25px}
+.head .sub{color:var(--ink-3);font-size:13.5px;margin-top:3px;max-width:760px}
+.searchbar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+.searchbar .field{margin:0;flex:1;min-width:200px}
+.searchbar .field select{min-width:150px}
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.mat{font-family:var(--f-num);font-size:12px;background:var(--accent-faint);border:1px solid var(--accent-soft);border-radius:7px;padding:2px 8px;color:#7A5A2B;white-space:nowrap}
+.dl{display:grid;grid-template-columns:auto 1fr;gap:7px 16px;font-size:13.5px}
+.dl dt{color:var(--ink-3);white-space:nowrap}
+.dl dd{min-width:0;word-break:break-word}
+.hist{border-left:3px solid var(--accent-soft);padding-left:16px;display:grid;gap:12px;margin:6px 0 2px}
+.hist .h-item{position:relative}
+.hist .h-item::before{content:"";position:absolute;left:-22px;top:6px;width:9px;height:9px;border-radius:50%;background:var(--accent);border:2px solid #fff;box-shadow:0 0 0 2px var(--accent-soft)}
+.hist .h-item .h-when{font-size:11.5px;color:var(--ink-3);font-family:var(--f-num)}
+.hist .h-item .h-what{font-size:13px;margin-top:2px}
+.hist .h-item .h-what b{color:var(--primary)}
+.console{background:#152420;color:#D8E6DD;border-radius:12px;padding:14px 16px;font-family:var(--f-num);font-size:12.5px;line-height:1.6;overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+.console .k{color:#8FD0A9}.console .r{color:#F0A392}.console .g{color:#E9C88F}
+.attack{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+.attack:last-child{border-bottom:none}
+.attack .desc{flex:1;min-width:220px}
+.attack .desc b{display:block;font-size:13.5px}
+.attack .desc small{color:var(--ink-3);font-size:12px}
+.bench-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.verdict{font-weight:700;font-family:var(--f-num);font-size:12.5px}
+.verdict.p{color:var(--ok)}.verdict.f{color:var(--danger)}
+details.sc{border:1px solid var(--line-soft);border-radius:10px;margin:0 0 8px;background:#fff}
+details.sc summary{list-style:none;display:flex;gap:10px;align-items:center;padding:10px 14px;font-size:13px;cursor:pointer;flex-wrap:wrap}
+details.sc summary::-webkit-details-marker{display:none}
+details.sc .body{padding:10px 14px;border-top:1px solid var(--line-soft);font-size:12.5px;color:var(--ink-2);background:var(--bg-soft);border-radius:0 0 10px 10px}
+.grp-h{font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:700;margin:18px 0 10px}
+#toasts{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:150;display:flex;flex-direction:column;gap:8px;width:min(480px,calc(100vw - 24px))}
+.toast{background:var(--primary-deep);color:#fff;border-radius:12px;padding:12px 16px;font-size:13.5px;box-shadow:var(--shadow-lg);animation:fadein .25s}
+.toast.err{background:#843023}.toast.ok{background:#245C3B}
+.login-err{display:none;background:var(--danger-bg);border:1px solid #E7C7BF;color:#7E2E22;border-radius:10px;padding:11px 14px;font-size:13px;margin-bottom:14px}
+.login-err.on{display:flex;gap:9px;align-items:flex-start}
+.spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:rot .7s linear infinite;display:none}
+@keyframes rot{to{transform:rotate(360deg)}}
+.btn.busy .spin{display:inline-block}
+.creds{background:var(--accent-faint);border:1px solid var(--accent-soft);border-radius:11px;padding:11px 14px;font-size:12.5px;margin-top:15px}
+.creds code{font-family:var(--f-num);font-size:11.5px;background:#fff;border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+.creds .row{display:flex;justify-content:space-between;gap:8px;padding:3px 0;flex-wrap:wrap}
+
+/* Connexion */
+#v-login{max-width:none;padding:0}
+.login-wrap{min-height:calc(100vh - 120px);display:grid;grid-template-columns:minmax(330px,42%) 1fr}
+.login-hero{background:var(--primary);color:#fff;padding:44px 40px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden}
+.login-hero::after{content:"";position:absolute;right:-70px;bottom:-70px;width:250px;height:250px;border-radius:50%;border:32px solid rgba(200,159,98,.16)}
+.login-hero h1{color:#fff;font-size:27px;margin:8px 0}
+.login-hero p{color:rgba(255,255,255,.8);font-size:14px;max-width:420px}
+.login-hero ul{list-style:none;display:grid;gap:11px;margin-top:20px}
+.login-hero li{display:flex;gap:10px;font-size:13.5px;color:rgba(255,255,255,.86)}
+.login-hero li b{color:var(--accent)}
+.login-hero .foot{font-size:11.5px;color:rgba(255,255,255,.55);position:relative;z-index:1}
+.login-form{display:flex;align-items:center;justify-content:center;padding:30px 20px;background:var(--bg)}
+.login-card{width:100%;max-width:410px}
+.login-card h2{font-size:21px;margin-bottom:4px}
+
+@media(max-width:900px){.g2,.g3,.kpi-row,.bench-summary{grid-template-columns:1fr 1fr}.login-wrap{grid-template-columns:1fr}.login-hero{padding:30px 24px}.login-hero ul{display:none}.wrap{padding:16px 14px 70px}.top{padding:10px 14px}}
+@media(max-width:640px){.g2,.g3,.kpi-row,.bench-summary{grid-template-columns:1fr}.tbl-wrap{overflow:visible}table.tbl{min-width:0;border:none}.tbl thead{display:none}.tbl tr{display:block;background:#fff;border:1px solid var(--line);border-radius:12px;margin:0 0 10px;padding:6px 4px;box-shadow:var(--shadow)}.tbl td{display:flex;justify-content:space-between;align-items:center;gap:12px;border:none;padding:8px 12px}.tbl td::before{content:attr(data-l);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);flex-shrink:0}.tbl td.num{text-align:right}.tbl td.act{justify-content:flex-end}.tbl td.act::before{display:none}.tag{white-space:normal}.dl{grid-template-columns:1fr}.dl dt{margin-top:6px}.dl dd{margin-left:12px}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="logo"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Ccircle cx='24' cy='24' r='21' fill='%23FFFFFF'/%3E%3Cpath d='M24 10l4.2 8.6 9.5 1.4-6.9 6.7 1.6 9.4L24 31.6l-8.4 4.5 1.6-9.4-6.9-6.7 9.5-1.4z' fill='%232A4A3A'/%3E%3C/svg%3E" alt="">
+  <span><b>ADL-CI GESTION</b><small>Module membres — Registre nominatif</small></span></div>
+  <div class="who" id="top-who" style="display:none">
+    <span class="ava" id="top-ava">–</span>
+    <span><b id="top-name">–</b><small id="top-role">–</small></span>
+    <button class="btn gold sm" id="btn-logout">Déconnexion</button>
+  </div>
+</header>
+<nav class="topnav" id="topnav" aria-label="Sections"></nav>
+
+<!-- ============ CONNEXION ============ -->
+<div class="tab" id="v-login">
+  <div class="login-wrap">
+    <div class="login-hero">
+      <div>
+        <h1>Registre nominatif</h1>
+        <p>Un membre = une fiche nominative, un matricule unique jamais réutilisé, un historique complet des modifications. Les droits d'écriture sont vérifiés par le serveur à chaque appel.</p>
+        <ul>
+          <li><b>Matricule</b> généré automatiquement : ADLCI-AAAA-0001, séquence par année, jamais réattribué.</li>
+          <li><b>Doublons</b> refusés : même nom et prénom (accents et majuscules ignorés), le serveur cite le matricule existant.</li>
+          <li><b>Statuts</b> : désactiver un membre avec des cotisations dues exige un motif — les obligations déjà enregistrées ne s'effacent pas.</li>
+          <li><b>Historique</b> : chaque modification est tracée avec l'ancienne et la nouvelle valeur (RG-X3).</li>
+        </ul>
+      </div>
+      <div class="foot">Prototype v1.0 · Production visée : Node.js + Express / PostgreSQL (AT-1) · Navigateur moderne requis (Web Crypto).</div>
+    </div>
+    <div class="login-form">
+      <div class="login-card">
+        <h2>Connexion</h2>
+        <p style="font-size:13.5px;color:var(--ink-3);margin-bottom:16px">Les droits sur le registre dépendent du rôle : le secrétaire général écrit, les autres consultent selon leur périmètre.</p>
+        <div id="lg-err" class="login-err" role="alert"><span>⚠️</span><span id="lg-err-txt"></span></div>
+        <form id="login-form" novalidate>
+          <div class="field" id="f-lg-user"><label for="lg-user">Identifiant <span style="color:var(--danger)">*</span></label>
+            <input id="lg-user" type="text" autocomplete="username" placeholder="Ex. : f.cisse"><p class="errmsg">Saisissez votre identifiant.</p></div>
+          <div class="field" id="f-lg-pass"><label for="lg-pass">Mot de passe <span style="color:var(--danger)">*</span></label>
+            <input id="lg-pass" type="password" autocomplete="current-password" placeholder="Votre mot de passe"><p class="errmsg">Saisissez votre mot de passe.</p></div>
+          <button class="btn pri" id="lg-submit" type="submit" style="width:100%">Se connecter <span class="spin"></span></button>
+        </form>
+        <div class="creds">
+          <b style="display:block;margin-bottom:5px">Comptes de démonstration (retirés en production)</b>
+          <div class="row"><span>Secrétaire général (écrit le registre)</span><code>f.cisse / Secretariat-2026!</code></div>
+          <div class="row"><span>Administrateur (supervision)</span><code>s.diallo / Admin-2026!CI</code></div>
+          <div class="row"><span>Président (supervision)</span><code>m.kante / President-2026!</code></div>
+          <div class="row"><span>Trésorier (lecture)</span><code>a.traore / Tresor-2026!CI</code></div>
+          <div class="row"><span>Membre du bureau (lecture)</span><code>n.aka / Bureau-2026!CI</code></div>
+          <div class="row"><span>Membre ordinaire (sa fiche)</span><code>k.yao / Membre-2026!CI</code></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap" id="v-appzone" style="display:none">
+  <!-- ============ MEMBRES ============ -->
+  <div class="tab" id="v-membres">
+    <div class="head"><div><h1>Registre des membres</h1><p class="sub" id="membres-sub">Recherche, filtres par tribu et par statut — la requête est traitée par le serveur, qui ne renvoie que les fiches autorisées pour votre rôle.</p></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap" id="membres-actions">
+        <button class="btn ghost" id="btn-export">Exporter (tableur)</button>
+        <button class="btn pri" id="btn-member-new">+ Adhérer un membre</button>
+      </div></div>
+    <div class="kpi-row">
+      <div class="kpi gold"><span class="lab">Résultats affichés</span><div class="val" id="k-show">–</div></div>
+      <div class="kpi"><span class="lab">Membres actifs</span><div class="val" id="k-actifs">–</div></div>
+      <div class="kpi"><span class="lab">Membres inactifs</span><div class="val" id="k-inactifs">–</div></div>
+      <div class="kpi"><span class="lab">Cotisations dus (total)</span><div class="val" id="k-dus">–</div></div>
+    </div>
+    <div class="searchbar">
+      <div class="field"><label for="q">Rechercher (nom, prénom, matricule, téléphone)</label><input id="q" type="search" placeholder="Ex. : Sanogo, ADLCI-2026-0001, 0707…"></div>
+      <div class="field"><label for="f-tribu">Tribu</label><select id="f-tribu"><option value="">Toutes les tribus</option></select></div>
+      <div class="field"><label for="f-statut">Statut</label><select id="f-statut"><option value="">Tous les statuts</option><option value="actif">Actif</option><option value="inactif">Inactif</option></select></div>
+      <button class="btn ghost" id="btn-reset" title="Réinitialiser">Réinitialiser</button>
+    </div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="members-tbl">
+      <thead><tr><th>Membre</th><th>Matricule</th><th>Tribu</th><th>Téléphone</th><th>Adhésion</th><th>Statut</th><th>Cotisations</th><th></th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+    <div id="membres-note" style="margin-top:14px"></div>
+  </div>
+
+  <!-- ============ FICHE MEMBRE ============ -->
+  <div class="tab" id="v-fiche">
+    <div class="head"><div><h1 id="fiche-title">Fiche membre</h1><p class="sub" id="fiche-sub">Toutes les modifications passent par le serveur : validation des données, autorisation du rôle, traçabilité avec ancienne et nouvelle valeur.</p></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap" id="fiche-actions">
+        <button class="btn ghost" id="btn-fiche-back">← Retour au registre</button>
+        <button class="btn pri" id="btn-fiche-edit">Modifier</button>
+        <button class="btn danger" id="btn-fiche-status">Désactiver</button>
+      </div></div>
+    <div class="grid g2">
+      <div class="card"><div class="card-h"><h2>Informations nominatives</h2><span id="fiche-statut"></span></div><div class="card-b"><dl class="dl" id="fiche-infos"></dl></div></div>
+      <div class="card"><div class="card-h"><h2>Situation d'engagement</h2></div><div class="card-b" id="fiche-engagement"></div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>Historique de la fiche</h2><span class="tag neutral">RG-X3 — ancienne et nouvelle valeur conservées</span></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="hist-tbl">
+      <thead><tr><th>Quand</th><th>Qui</th><th>Action</th><th>Détail</th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ FORMULAIRES ============ -->
+  <div class="tab" id="v-form">
+    <div class="head"><div><h1 id="form-title">Adhérer un membre</h1><p class="sub" id="form-sub">Le matricule est attribué par le serveur au format ADLCI-AAAA-0001 (séquence de l'année d'adhésion). Aucun matricule n'est jamais réutilisé.</p></div></div>
+    <div class="grid g2">
+      <div class="card"><div class="card-h"><h2>Identité et contact</h2></div><div class="card-b">
+        <div class="grid g2">
+          <div class="field" id="f-nom"><label for="nom">Nom <span style="color:var(--danger)">*</span></label><input id="nom" type="text"><p class="errmsg">Le nom est obligatoire (lettres, espaces, tirets, apostrophes).</p></div>
+          <div class="field" id="f-prenom"><label for="prenom">Prénom <span style="color:var(--danger)">*</span></label><input id="prenom" type="text"><p class="errmsg">Le prénom est obligatoire.</p></div>
+        </div>
+        <div class="field" id="f-tel"><label for="tel">Numéro de téléphone <span style="color:var(--danger)">*</span></label><input id="tel" type="tel" inputmode="numeric" placeholder="10 chiffres, ex. : 0708091011"><p class="errmsg">Numéro invalide : 10 chiffres attendus (format ivoirien, ex. 0708091011).</p></div>
+        <div class="field" id="f-tribu"><label for="tribu">Tribu d'appartenance <span style="color:var(--danger)">*</span></label>
+          <select id="tribu"><option value="">— Choisir la tribu —</option></select>
+          <p class="errmsg">Choisissez l'une des six tribus de l'association.</p></div>
+      </div></div>
+      <div class="card"><div class="card-h"><h2>Adhésion et observations</h2></div><div class="card-b">
+        <div class="field" id="f-date"><label for="date_adh">Date d'adhésion <span style="color:var(--danger)">*</span></label><input id="date_adh" type="date"><p class="errmsg">Date obligatoire, au plus tard aujourd'hui.</p></div>
+        <div class="field" id="f-statut-new" style="display:none"><label for="statut_new">Statut</label><select id="statut_new" disabled><option>Actif</option></select><p class="help">Un nouveau membre démarre toujours actif.</p></div>
+        <div class="field" id="f-obs"><label for="obs">Observations éventuelles</label><textarea id="obs" maxlength="200" placeholder="200 caractères maximum — jamais de donnée sensible (santé, situation familiale)"></textarea><p class="help">Servira de champ libre au secrétaire ; l'entrée est filtrée à l'affichage contre les injections.</p></div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap"><button class="btn ghost" id="form-cancel">Annuler</button><button class="btn pri" id="form-submit">Enregistrer</button></div>
+        <div id="form-result" style="margin-top:12px"></div>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- ============ JOURNAL D'AUDIT ============ -->
+  <div class="tab" id="v-journal">
+    <div class="head"><div><h1>Journal d'audit</h1><p class="sub">Lecture seule (RG-X2). Chaque entrée est chaînée par hachage à la précédente : toute altération devient détectable.</p></div>
+      <button class="btn pri" id="btn-audit-verify">Vérifier l'intégrité de la chaîne</button></div>
+    <div id="audit-verify-result" style="margin-bottom:14px"></div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="audit-tbl">
+      <thead><tr><th>#</th><th>Horodatage</th><th>Auteur</th><th>Action</th><th>Détail</th><th>Niveau</th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ BANC DE TESTS ============ -->
+  <div class="tab" id="v-bench">
+    <div class="head"><div><h1>Banc de tests du module membres</h1><p class="sub">24 scénarios avec des données fictives : matricules et séquences, doublons, autorisations, filtres serveur, obligations comptables aux changements de statut, immutabilité du matricule, historique. Les appels contournent volontairement l'interface pour prouver que les refus viennent du serveur.</p></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn pri" id="btn-bench-run">Lancer tous les tests</button><button class="btn ghost" id="btn-bench-export">Exporter (JSON)</button></div></div>
+    <div class="bench-summary">
+      <div class="kpi gold"><span class="lab">Scénarios exécutés</span><div class="val" id="bs-total">–</div></div>
+      <div class="kpi"><span class="lab">Conformes (✓)</span><div class="val" id="bs-pass">–</div></div>
+      <div class="kpi"><span class="lab">Écarts (✗)</span><div class="val" id="bs-fail">–</div></div>
+      <div class="kpi"><span class="lab">Durée</span><div class="val" id="bs-time">–</div></div>
+    </div>
+    <div id="bench-results"><div class="note info"><span>▶</span><span><b>Lancez la suite.</b> Données fictives uniquement ; l'environnement est réinitialisé avant et après l'exécution.</span></div></div>
+  </div>
+
+  <!-- ============ CONSOLE D'INTRUSION ============ -->
+  <div class="tab" id="v-intrusion">
+    <div class="head"><div><h1>Console d'intrusion</h1><p class="sub">Attaques lancées hors de l'interface : modification d'une fiche sans droit, changement de statut par un autre rôle, suppression définitive (qui n'existe pas), jeton forgé.</p></div></div>
+    <div class="card" style="margin-bottom:16px"><div id="attacks"></div></div>
+    <div class="card"><div class="card-h"><h2>Réponses brutes du serveur</h2><button class="btn ghost sm" id="btn-console-clear">Effacer la console</button></div><div class="card-b"><div class="console" id="console-out">Console prête. Choisissez une attaque ci-dessus.</div></div></div>
+  </div>
+
+  <!-- ============ PRODUCTION & LIMITES ============ -->
+  <div class="tab" id="v-archi">
+    <div class="head"><div><h1>Correspondance production et limites</h1><p class="sub">Le prototype spécifie les comportements ; la production les porte sur la stack validée AT-1 (Node.js + Express, PostgreSQL, IndexedDB/Dexie pour la file locale).</p></div></div>
+    <div class="card"><div class="card-h"><h2>Du prototype à la production</h2></div>
+      <div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="map-tbl">
+        <thead><tr><th>Mécanisme (prototype)</th><th>Implémentation de production</th><th>Verrou</th></tr></thead>
+        <tbody id="map-body"></tbody></table></div></div></div>
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card"><div class="card-h"><h2>Limites assumées</h2><span class="tag warn">Honnêteté avant tout</span></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="flaws-tbl">
+        <thead><tr><th>#</th><th>Constat</th><th>Traitement en production</th></tr></thead>
+        <tbody id="flaws-body"></tbody></table></div></div></div>
+      <div class="card"><div class="card-h"><h2>Les règles du registre, en bref</h2></div><div class="card-b"><div style="display:grid;gap:10px;font-size:13.5px" id="rules-list"></div></div></div>
+    </div>
+  </div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+<script>
+"use strict";
+/* ==================================================================
+   SERVEUR SIMULÉ — la base des comptes, des fiches membres, des
+   sessions et du journal vit ici et nulle part ailleurs. Le client
+   ne reçoit que des projections (DTO) sans référence interne.
+   ================================================================== */
+const SERVER = (() => {
+  const enc = new TextEncoder();
+  if (!window.crypto || !crypto.subtle) { alert("Navigateur sans Web Crypto : ce prototype exige un navigateur moderne."); throw new Error("no crypto"); }
+  async function sha256(str) {
+    const d = await crypto.subtle.digest("SHA-256", enc.encode(str));
+    return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  async function pbkdf2(pass, saltHex, iters = 120000) {
+    const key = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveBits"]);
+    const salt = new Uint8Array((saltHex.match(/../g) || []).map(h => parseInt(h, 16)));
+    const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: iters }, key, 256);
+    return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  const rand = n => [...crypto.getRandomValues(new Uint8Array(n))].map(b => b.toString(16).padStart(2, "0")).join("");
+
+  let CLOCK_OFF = 0;
+  const now = () => Date.now() + CLOCK_OFF;
+  const iso = () => new Date(now()).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  const SESSION_TTL = 8 * 3600 * 1000;
+  const users = [], sessions = new Map();
+  let auditSeq = 0, auditLog = [], auditTail = Promise.resolve();
+  async function _audit(action, actor, role, detail, level) {
+    const e = { seq: ++auditSeq, ts: iso(), actor: actor || "système", role: role || "—", action, detail: detail || "", level: level || "INFO", prev: auditLog.length ? auditLog[auditLog.length - 1].hash : "GENÈSE" };
+    e.hash = await sha256([e.seq, e.ts, e.actor, e.action, e.detail, e.prev].join("|"));
+    auditLog.push(e);
+    return e.seq;
+  }
+  function audit(action, actor, role, detail, level) {
+    const p = auditTail.then(() => _audit(action, actor, role, detail, level));
+    auditTail = p.then(() => undefined, () => undefined);
+    return p;
+  }
+  async function verifyAudit() {
+    let prev = "GENÈSE";
+    for (const e of auditLog) {
+      const h = await sha256([e.seq, e.ts, e.actor, e.action, e.detail, e.prev].join("|"));
+      if (e.prev !== prev) return { integre: false, seq: e.seq, motif: "chaîne rompue (lien avec l'entrée précédente)" };
+      if (h !== e.hash) return { integre: false, seq: e.seq, motif: "contenu modifié (hash recomposé différent)" };
+      prev = e.hash;
+    }
+    return { integre: true, seq: auditSeq, motif: "" };
+  }
+
+  const R = { admin: "Administrateur", president: "Président", tresorier: "Trésorier", secretaire: "Secrétaire général", bureau: "Autre membre du bureau", membre: "Membre ordinaire" };
+  const ROLES = Object.keys(R);
+  const TRIBUS = ["Douayêro", "Mariabêh", "Abouyabêh", "Aliyabêh", "Simbayabêh", "Djigayabêh"];
+  const PERMS = {
+    "auth.self":            ["admin","president","tresorier","secretaire","bureau","membre"],
+    "members.view_self":    ["admin","president","tresorier","secretaire","bureau","membre"],
+    "members.view_all":     ["admin","president","tresorier","secretaire","bureau"],
+    "members.create":       ["secretaire"],
+    "members.update":       ["secretaire"],
+    "members.status":       ["secretaire"],
+    "audit.view":           ["admin","president"]
+  };
+
+  /* ── Registre des membres : données fictives de démonstration ── */
+  const members = [], mCounter = {}, mHistory = [];
+  function nextMatricule(year) {
+    mCounter[year] = (mCounter[year] || 0) + 1;
+    return "ADLCI-" + year + "-" + String(mCounter[year]).padStart(4, "0");
+  }
+  function logHistory(memberId, action, field, oldV, newV, actor) {
+    mHistory.push({ id: mHistory.length + 1, memberId, ts: iso(), actor, action, field, old: oldV, new: newV });
+  }
+  const norm = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const mDTO = m => ({ id: m.id, matricule: m.matricule, nom: m.nom, prenom: m.prenom, tel: m.tel, tribu: m.tribu, date_adhesion: m.date_adhesion, statut: m.statut, observations: m.observations, score: m.score, moisDu: m.moisDu });
+
+  /* ── Validation des données (côté serveur, toujours) ── */
+  const RE_NAME = /^[A-Za-zÀ-ÖØ-öø-ÿ'’ -]{2,60}$/;
+  const RE_TEL = /^0[0-9]{9}$/;
+  function validateMember(b, partial) {
+    const errs = [];
+    if (!partial || b.nom !== undefined) { if (!b.nom || !RE_NAME.test(String(b.nom).trim())) errs.push("nom invalide (lettres, espaces, tirets, apostrophes)"); }
+    if (!partial || b.prenom !== undefined) { if (!b.prenom || !RE_NAME.test(String(b.prenom).trim())) errs.push("prénom invalide"); }
+    if (!partial || b.tel !== undefined) { if (!b.tel || !RE_TEL.test(String(b.tel).replace(/[\s.-]/g, ""))) errs.push("téléphone invalide : 10 chiffres attendus (format ivoirien, ex. 0708091011)"); }
+    if (!partial || b.tribu !== undefined) { if (!TRIBUS.includes(b.tribu)) errs.push("tribu inconnue : choisir parmi " + TRIBUS.join(", ")); }
+    if (!partial || b.date_adhesion !== undefined) {
+      if (!b.date_adhesion || !/^\d{4}-\d{2}-\d{2}$/.test(b.date_adhesion)) errs.push("date d'adhésion obligatoire (AAAA-MM-JJ)");
+      else { const d = new Date(b.date_adhesion + "T00:00:00"); if (isNaN(d) || d.getTime() > now()) errs.push("date d'adhésion impossible : elle ne peut pas être dans le futur"); }
+    }
+    if (b.observations !== undefined && String(b.observations).length > 200) errs.push("observations trop longues (200 caractères maximum)");
+    return errs;
+  }
+  function findDuplicate(nom, prenom, excludeId) {
+    const n = norm(nom), p = norm(prenom);
+    return members.find(m => norm(m.nom) === n && norm(m.prenom) === p && m.id !== excludeId);
+  }
+
+  const resp = (status, code, msg, data, auditId) => ({ status, code, msg, data: data ?? null, auditId: auditId ?? null });
+  function openSession(u) { const t = rand(32); sessions.set(t, { userId: u.id, exp: now() + SESSION_TTL }); return t; }
+  function revokeUserSessions(uid) { for (const [t, s] of sessions) if (s.userId === uid) sessions.delete(t); }
+  const userDTO = u => ({ id: u.id, user: u.user, nom: u.nom, role: u.role, roleLabel: R[u.role], statut: u.statut, memberId: u.memberId });
+
+  async function guard(req, def) {
+    if (!def) { const a = await audit("ENDPOINT_INEXISTANT", req.actorLabel || "inconnu", "—", (req.endpoint || "?") + " — requête rejetée, aucun accès libre au registre", "BLOCAGE"); return resp(404, "ENDPOINT_INEXISTANT", "Cette action n'existe pas sur le serveur — en particulier, le registre n'offre aucune suppression définitive.", null, a); }
+    if (def.public) return null;
+    const s = req.token && sessions.get(req.token);
+    if (!req.token || !s) { const a = await audit("SESSION_REQUISE", req.actorLabel || "anonyme", "—", req.endpoint + " sans session valide" + (req.token ? " (jeton inconnu ou révoqué)" : ""), "BLOCAGE"); return resp(401, "AUTH_REQUISE", "Vous devez être connecté pour cette action." + (req.token ? " Jeton inconnu du serveur — l'essai a été enregistré." : ""), null, a); }
+    if (s.exp <= now()) { sessions.delete(req.token); const a = await audit("SESSION_EXPIREE", "?", "—", req.endpoint, "BLOCAGE"); return resp(401, "SESSION_EXPIREE", "Votre session a expiré (8 heures). Reconnectez-vous.", null, a); }
+    const u = users.find(x => x.id === s.userId);
+    if (!u || u.statut !== "actif") { sessions.delete(req.token); const a = await audit("COMPTE_REFUSE", u ? u.user : "?", "—", req.endpoint + " — compte désactivé", "BLOCAGE"); return resp(401, "COMPTE_DESACTIVE", "Ce compte est désactivé.", null, a); }
+    if (def.perm && !PERMS[def.perm]?.includes(u.role)) { const a = await audit("TENTATIVE_NON_AUTORISEE", u.user, R[u.role], req.endpoint + " exige « " + (def.perm || "—") + " » — rôle « " + R[u.role] + " » refusé", "ALERTE"); return resp(403, "ACCES_REFUSE", "Votre rôle (« " + R[u.role] + " ») n'autorise pas cette action. Le refus est prononcé par le serveur et enregistré au journal.", null, a); }
+    req.user = u;
+    return null;
+  }
+
+  /* ── Endpoints ── */
+  const EP = {};
+  EP["auth.login"] = { public: true, async h(req) {
+    const { user, pass } = req.body || {};
+    const u = users.find(x => x.user === user);
+    if (!u) return resp(401, "IDENTIFIANT_INVALIDE", "Identifiant ou mot de passe incorrect.", null, await audit("CONNEXION_ECHEC", String(user || "?"), "—", "identifiant inconnu", "ALERTE"));
+    if (u.statut !== "actif") return resp(401, "COMPTE_DESACTIVE", "Ce compte a été désactivé par l'administrateur.", null, await audit("CONNEXION_COMPTE_DESACTIVE", u.user, R[u.role], "", "BLOCAGE"));
+    const h = await pbkdf2(pass || "", u.salt);
+    if (h !== u.hash) return resp(401, "IDENTIFIANT_INVALIDE", "Identifiant ou mot de passe incorrect.", null, await audit("CONNEXION_ECHEC", u.user, R[u.role], "mot de passe incorrect", "ALERTE"));
+    u.derniere = iso();
+    const t = openSession(u);
+    return resp(200, "OK", "Bienvenue " + u.nom + " — session ouverte pour 8 heures.", { token: t, user: userDTO(u), perms: Object.keys(PERMS).filter(p => PERMS[p].includes(u.role)) }, await audit("CONNEXION", u.user, R[u.role], "session ouverte pour 8 h"));
+  } };
+  EP["auth.logout"] = { perm: "auth.self", async h(req) { sessions.delete(req.token); return resp(200, "OK", "Session fermée.", null, await audit("DECONNEXION", req.user.user, R[req.user.role], "session fermée")); } };
+  EP["auth.whoami"] = { perm: "auth.self", async h(req) { return resp(200, "OK", "Session valide.", { user: userDTO(req.user), perms: Object.keys(PERMS).filter(p => PERMS[p].includes(req.user.role)) }); } };
+
+  /* Consultation : liste, recherche et filtres traités par le serveur */
+  EP["members.list"] = { perm: "members.view_all", async h(req) {
+    const q = norm((req.body || {}).q), tribu = (req.body || {}).tribu, statut = (req.body || {}).statut;
+    let out = members.slice();
+    if (tribu) out = out.filter(m => m.tribu === tribu);
+    if (statut) out = out.filter(m => m.statut === statut);
+    if (q) out = out.filter(m => norm(m.nom + " " + m.prenom).includes(q) || m.matricule.toLowerCase().includes(q) || String(m.tel).includes(q));
+    out.sort((a, b) => (a.nom + a.prenom).localeCompare(b.nom + b.prenom, "fr"));
+    return resp(200, "OK", out.length + " fiche(s) — recherche et filtres appliqués par le serveur.", out.map(mDTO));
+  } };
+  EP["members.get"] = { perm: "members.view_self", async h(req) {
+    const id = Number((req.body || {}).id);
+    const m = members.find(x => x.id === id);
+    if (!m) return resp(404, "FICHE_INCONNUE", "Aucune fiche ne porte cet identifiant interne.", null, await audit("FICHE_INCONNUE", req.user.user, R[req.user.role], "id " + id, "ALERTE"));
+    const own = req.user.memberId === m.id;
+    if (!own && !PERMS["members.view_all"].includes(req.user.role)) { const a = await audit("TENTATIVE_NON_AUTORISEE", req.user.user, R[req.user.role], "lecture de la fiche de " + m.matricule + " sans droit members.view_all", "ALERTE"); return resp(403, "ACCES_REFUSE", "Un membre ne consulte que sa propre fiche. Les fiches des autres sont réservées au bureau.", null, a); }
+    return resp(200, "OK", "Fiche " + m.matricule + ".", { ...mDTO(m), own });
+  } };
+  EP["members.view_self"] = { perm: "members.view_self", async h(req) {
+    const m = req.user.memberId ? members.find(x => x.id === req.user.memberId) : null;
+    return resp(200, "OK", m ? "Votre fiche." : "Aucune fiche membre n'est liée à ce compte (compte de gestion).", m ? { ...mDTO(m) } : { note: "compte de gestion sans fiche" });
+  } };
+  EP["members.history"] = { perm: "members.view_self", async h(req) {
+    const id = Number((req.body || {}).id);
+    const m = members.find(x => x.id === id);
+    if (!m) return resp(404, "FICHE_INCONNUE", "Aucune fiche ne porte cet identifiant interne.");
+    const own = req.user.memberId === m.id;
+    if (!own && !PERMS["members.view_all"].includes(req.user.role)) return resp(403, "ACCES_REFUSE", "L'historique des autres membres est réservé au bureau.", null, await audit("TENTATIVE_NON_AUTORISEE", req.user.user, R[req.user.role], "historique de " + m.matricule, "ALERTE"));
+    const rows = mHistory.filter(h => h.memberId === id);
+    return resp(200, "OK", rows.length + " événement(s) tracé(s).", rows.map(h => ({ ...h })));
+  } };
+
+  /* Création : matricule automatique, dédoublonnage, validation */
+  EP["members.create"] = { perm: "members.create", async h(req) {
+    const b = req.body || {};
+    const errs = validateMember(b, false);
+    if (errs.length) return resp(422, "DONNEES_INVALIDES", "Saisie refusée par le serveur : " + errs.join(" ; ") + ".", null, await audit("ADHESION_REJETEE", req.user.user, R[req.user.role], errs.join(" ; "), "ALERTE"));
+    const dup = findDuplicate(b.nom, b.prenom, 0);
+    if (dup) return resp(409, "DOUBLON", "Un membre du même nom et prénom existe déjà : " + dup.nom + " " + dup.prenom + ", matricule " + dup.matricule + ". Le registre refuse les doublons.", { matricule: dup.matricule }, await audit("ADHESION_DOUBLON", req.user.user, R[req.user.role], dup.nom + " " + dup.prenom + " — " + dup.matricule, "ALERTE"));
+    const year = b.date_adhesion.slice(0, 4);
+    const mat = nextMatricule(year);
+    const m = { id: members.length + 1, matricule: mat, nom: String(b.nom).trim(), prenom: String(b.prenom).trim(), tel: String(b.tel).replace(/[\s.-]/g, ""), tribu: b.tribu, date_adhesion: b.date_adhesion, statut: "actif", observations: String(b.observations || "").slice(0, 200), score: 0, moisDu: 0 };
+    members.push(m);
+    logHistory(m.id, "création", "fiche", "—", m.matricule + " (" + m.nom + " " + m.prenom + ", " + m.tribu + ")", req.user.user);
+    return resp(200, "OK", m.nom + " " + m.prenom + " est adhérent(e) — matricule " + mat + " attribué automatiquement (séquence " + year + ").", { ...mDTO(m) }, await audit("MEMBRE_ADHERE", req.user.user, R[req.user.role], m.nom + " " + m.prenom + " — " + mat + " — tribu " + m.tribu + " — adhésion " + m.date_adhesion));
+  } };
+
+  /* Modification autorisée : secrétaire général seul, champ par champ, historique complet */
+  EP["members.update"] = { perm: "members.update", async h(req) {
+    const b = req.body || {};
+    const m = members.find(x => x.id === Number(b.id));
+    if (!m) return resp(404, "FICHE_INCONNUE", "Aucune fiche ne porte cet identifiant interne.");
+    if (b.patch && b.patch.matricule !== undefined && b.patch.matricule !== m.matricule) return resp(422, "MATRICULE_IMMUTABLE", "Le matricule est attribué par le serveur et n'est jamais modifié ni réutilisé.", null, await audit("MODIF_REJETEE", req.user.user, R[req.user.role], "tentative de changement de matricule de " + m.matricule, "BLOCAGE"));
+    const patch = b.patch || {};
+    const errs = validateMember(patch, true);
+    if (errs.length) return resp(422, "DONNEES_INVALIDES", "Modification refusée par le serveur : " + errs.join(" ; ") + ".", null, await audit("MODIF_REJETEE", req.user.user, R[req.user.role], errs.join(" ; "), "ALERTE"));
+    const dup = (patch.nom || patch.prenom !== undefined) && findDuplicate(patch.nom !== undefined ? patch.nom : m.nom, patch.prenom !== undefined ? patch.prenom : m.prenom, m.id);
+    if (dup) return resp(409, "DOUBLON", "La modification créerait un doublon : " + dup.nom + " " + dup.prenom + " (" + dup.matricule + ") existe déjà.", { matricule: dup.matricule }, await audit("MODIF_DOUBLON", req.user.user, R[req.user.role], "vers " + dup.matricule, "ALERTE"));
+    const LABELS = { nom: "nom", prenom: "prénom", tel: "téléphone", tribu: "tribu", date_adhesion: "date d'adhésion", observations: "observations" };
+    const changes = [];
+    for (const k of Object.keys(LABELS)) {
+      if (patch[k] === undefined) continue;
+      const nv = k === "tel" ? String(patch[k]).replace(/[\s.-]/g, "") : k === "observations" ? String(patch[k] || "").slice(0, 200) : String(patch[k]).trim();
+      if (nv === m[k]) continue;
+      logHistory(m.id, "modification", LABELS[k], m[k], nv, req.user.user);
+      m[k] = nv;
+      changes.push(LABELS[k] + " : « " + (m[k].length > 40 ? m[k].slice(0, 40) + "…" : m[k]) + " »");
+    }
+    if (!changes.length) return resp(200, "OK", "Aucun changement à enregistrer (valeurs identiques).", { ...mDTO(m) });
+    m.updatedAt = iso();
+    return resp(200, "OK", "Fiche mise à jour : " + changes.join(" ; ") + ".", { ...mDTO(m) }, await audit("MEMBRE_MODIFIE", req.user.user, R[req.user.role], m.matricule + " (" + m.nom + " " + m.prenom + ") — " + changes.join(" ; ") + " — RG-X3"));
+  } };
+
+  /* Changement de statut : soumis aux obligations déjà enregistrées */
+  EP["members.status"] = { perm: "members.status", async h(req) {
+    const b = req.body || {};
+    const m = members.find(x => x.id === Number(b.id));
+    if (!m) return resp(404, "FICHE_INCONNUE", "Aucune fiche ne porte cet identifiant interne.");
+    const motif = String(b.motif || "").trim();
+    if (b.statut === m.statut) return resp(200, "OK", "Ce membre est déjà " + (m.statut === "actif" ? "actif" : "inactif") + ".", { ...mDTO(m) });
+    if (b.statut !== "actif" && b.statut !== "inactif") return resp(422, "STATUT_INCONNU", "Statut inconnu : actif ou inactif seulement.", null, await audit("STATUT_REJETE", req.user.user, R[req.user.role], "statut demandé : " + b.statut, "ALERTE"));
+    if (b.statut === "inactif") {
+      if (m.moisDu > 0 && motif.length < 10) return resp(422, "OBLIGATION_NON_REGLEE", "Ce membre a " + m.moisDu + " mois de cotisation dus : obligations déjà enregistrées. La désactivation exige un motif d'au moins 10 caractères (décision du bureau, départ annoncé) et n'efface pas la dette — elle reste due et visible sur la fiche.", null, await audit("STATUT_REJETE", req.user.user, R[req.user.role], m.matricule + " — " + m.moisDu + " mois dus, motif absent ou trop court", "ALERTE"));
+      m.statut = "inactif";
+      logHistory(m.id, "désactivation", "statut", "actif", "inactif", req.user.user);
+      if (motif) logHistory(m.id, "désactivation", "motif", "—", motif.slice(0, 200), req.user.user);
+      return resp(200, "OK", m.nom + " " + m.prenom + " (" + m.matricule + ") est désactivé. Son matricule reste réservé et ses obligations (" + m.moisDu + " mois dus) restent dues — aucune suppression n'a eu lieu.", { ...mDTO(m) }, await audit("MEMBRE_DESACTIVE", req.user.user, R[req.user.role], m.matricule + " — " + (m.moisDu > 0 ? m.moisDu + " mois dus conservés — motif : " + motif.slice(0, 120) : "sans obligation") ));
+    }
+    m.statut = "actif";
+    logHistory(m.id, "réactivation", "statut", "inactif", "actif", req.user.user);
+    return resp(200, "OK", m.nom + " " + m.prenom + " (" + m.matricule + ") est réactivé — le matricule d'origine est conservé.", { ...mDTO(m) }, await audit("MEMBRE_REACTIVE", req.user.user, R[req.user.role], m.matricule));
+  } };
+
+  EP["audit.list"] = { perm: "audit.view", async h(req) { return resp(200, "OK", auditLog.length + " entrées.", auditLog.map(e => ({ ...e }))); } };
+  EP["audit.verify"] = { perm: "audit.view", async h(req) { const v = await verifyAudit(); return resp(200, "OK", v.integre ? "Chaîne intègre : aucune altération détectée sur " + v.seq + " entrées." : "ALERTE : chaîne compromise à l'entrée n° " + v.seq + " — " + v.motif, { ...v }); } };
+  EP["audit.tamper_demo"] = { perm: "audit.view", async h(req) { if (auditLog.length > 1) { const k = auditLog[Math.min(2, auditLog.length - 1)]; k.detail = k.detail + " [MODIFIÉ PAR UN ATTAQUANT]"; } return resp(200, "OK", "Simulation : une entrée ancienne a été altérée. Relancez la vérification d'intégrité."); } };
+
+  async function api(req) {
+    req.endpoint = req.endpoint || "?";
+    try {
+      const def = EP[req.endpoint];
+      const g = await guard(req, def);
+      if (g) return g;
+      return await def.h(req);
+    } catch (e) {
+      return resp(500, "ERREUR_SERVEUR", "Une erreur interne est survenue — l'action n'a pas été effectuée et a été journalisée.", null, await audit("ERREUR_INTERNE", "système", "—", req.endpoint + " : " + (e && e.message || "?"), "ALERTE"));
+    }
+  }
+
+  /* ── Amorçage : comptes et fiches fictives ── */
+  async function seed() {
+    const defs = [
+      ["s.diallo", "Admin-2026!CI", "admin", "Salif Diallo", 9],
+      ["m.kante", "President-2026!", "president", "Mariam Kanté", 8],
+      ["a.traore", "Tresor-2026!CI", "tresorier", "Awa Traoré", null],
+      ["f.cisse", "Secretariat-2026!", "secretaire", "Fatoumata Cissé", 3],
+      ["n.aka", "Bureau-2026!CI", "bureau", "Nantenin Aka", 6],
+      ["k.yao", "Membre-2026!CI", "membre", "Kouassi Yao", 1]
+    ];
+    users.length = 0;
+    for (const [user, pass, role, nom, memberId] of defs) {
+      const salt = rand(16);
+      users.push({ id: users.length + 1, user, nom, role, statut: "actif", salt, hash: await pbkdf2(pass, salt), derniere: "—", memberId });
+    }
+    sessions.clear();
+    await auditTail; auditSeq = 0; auditLog = []; auditTail = Promise.resolve();
+    members.length = 0; mHistory.length = 0;
+    for (const k of Object.keys(mCounter)) delete mCounter[k];
+    const seedM = [
+      ["Kouassi", "Yao", "0102030405", "Douayêro", "2025-03-08", "actif", 82, 0, "Trésorier adjoint la première année."],
+      ["Ibrahima", "Sanogo", "0505050506", "Mariabêh", "2025-03-08", "actif", 66, 2, ""],
+      ["Aminata", "Bamba", "0707070708", "Abouyabêh", "2025-04-12", "actif", 74, 0, ""],
+      ["Fatoumata", "Cissé", "0109090901", "Aliyabêh", "2025-04-12", "actif", 71, 0, "Secrétaire général de l'association."],
+      ["Adama", "Ouédraogo", "0545454545", "Simbayabêh", "2025-05-03", "inactif", 40, 3, "Départ hors du pays annoncé au bureau."],
+      ["Nantenin", "Aka", "0160606061", "Djigayabêh", "2025-05-03", "actif", 68, 0, ""],
+      ["Moussa", "Koné", "0780808080", "Douayêro", "2026-02-14", "actif", 55, 1, ""],
+      ["Mariam", "Kanté", "0101010102", "Mariabêh", "2026-02-14", "actif", 77, 0, "Présidente de l'association."],
+      ["Salif", "Diallo", "0521212121", "Abouyabêh", "2026-03-21", "actif", 63, 0, "Administrateur du système."]
+    ];
+    for (const [prenom, nom, tel, tribu, date, statut, score, moisDu, obs] of seedM) {
+      const year = date.slice(0, 4);
+      members.push({ id: members.length + 1, matricule: nextMatricule(year), nom, prenom, tel, tribu, date_adhesion: date, statut, observations: obs, score, moisDu });
+    }
+    CLOCK_OFF = 0;
+    await audit("SYSTEME_AMORCE", "système", "—", "Registre initialisé : 9 membres fictifs répartis dans les six tribus, séquences matricules 2025 → 0006 et 2026 → 0003 ; 6 comptes nominatifs.");
+  }
+
+  return { api, seed, R, ROLES, PERMS, TRIBUS, stats: () => ({ users: users.length, members: members.length, hist: mHistory.length, audit: auditSeq }), setClock: ms => { CLOCK_OFF = ms; } };
+})();
+/* ==================================================================
+   BANC DE TESTS — 24 scénarios, données fictives, appels directs au
+   serveur sans passer par l'interface.
+   ================================================================== */
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let BENCH_RESULTS = [];
+async function login(u, p) { return await SERVER.api({ endpoint: "auth.login", body: { user: u, pass: p } }); }
+async function call(endpoint, token, body) { return await SERVER.api({ endpoint, token, body }); }
+
+const BENCH = [
+  /* ── G1 · Matricules et création ── */
+  { id: "M1", g: 1, titre: "Ajout d'un membre : matricule automatique dans la séquence de l'année", attendu: "200 avec matricule ADLCI-2026-0004 (3 adhésions existent déjà en 2026)",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const r = await call("members.create", t, { nom: "Kaba", prenom: "Fanta", tel: "0755667788", tribu: "Douayêro", date_adhesion: "2026-11-01", observations: "Adhésion faite lors de la réunion de novembre." }); return { obtenu: "status " + r.status + " — matricule " + (r.data && r.data.matricule), pass: r.status === 200 && r.data.matricule === "ADLCI-2026-0004", detail: r.msg } } },
+  { id: "M2", g: 1, titre: "Doublon refusé (majuscules, accents et espaces ignorés)", attendu: "409 en citant le matricule existant ADLCI-2025-0002",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const r = await call("members.create", t, { nom: "SANOGO", prenom: "Ibrâhîma", tel: "0999999999", tribu: "Mariabêh", date_adhesion: "2026-11-02" }); return { obtenu: "status " + r.status + " (" + r.code + ") — " + r.msg.slice(0, 110), pass: r.status === 409 && /ADLCI-2025-0002/.test(r.msg) && r.data && /ADLCI-2025-0002/.test(r.data.matricule), detail: "La comparaison normalise accents, casse et espaces avant de conclure." } } },
+  { id: "M3", g: 1, titre: "Données invalides : chaque champ fautif est nommé par le serveur", attendu: "422 listant téléphone, tribu et date future",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const r = await call("members.create", t, { nom: "Doe", prenom: "Jane", tel: "abc12", tribu: "Inconnue", date_adhesion: "2030-01-01" }); const ok = r.status === 422 && /téléphone/.test(r.msg) && /tribu/.test(r.msg) && /futur/.test(r.msg); return { obtenu: "status " + r.status + " — motifs : " + r.msg.slice(0, 150), pass: ok, detail: "La validation est serveur, pas seulement dans le formulaire." } } },
+  { id: "M4", g: 1, titre: "Autorisation : seul le secrétaire général adhère un membre", attendu: "403 pour le membre ordinaire et pour le trésorier",
+    async fn() { const tm = (await login("k.yao", "Membre-2026!CI")).data.token; const r1 = await call("members.create", tm, { nom: "Test", prenom: "Refus", tel: "0711111111", tribu: "Douayêro", date_adhesion: "2026-11-01" }); const tt = (await login("a.traore", "Tresor-2026!CI")).data.token; const r2 = await call("members.create", tt, { nom: "Test", prenom: "Refus2", tel: "0711111112", tribu: "Douayêro", date_adhesion: "2026-11-01" }); return { obtenu: "membre " + r1.status + " ; trésorier " + r2.status, pass: r1.status === 403 && r2.status === 403, detail: "Le bouton « + Adhérer » est masqué pour eux, mais l'API serait attaquable sans le refus serveur." } } },
+  { id: "M5", g: 1, titre: "Un matricule n'est jamais réutilisé, même après désactivation", attendu: "les nouveaux matricules continuent les séquences (2025-0007, 0008 ; jamais un matricule d'un autre)",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const d = await call("members.status", t, { id: 7, statut: "inactif", motif: "Dormance test banc" }); const r1 = await call("members.create", t, { nom: "Traoré", prenom: "Lassina", tel: "0765656565", tribu: "Simbayabêh", date_adhesion: "2025-06-01" }); const r2 = await call("members.create", t, { nom: "Yéo", prenom: "Sarah", tel: "0765656566", tribu: "Aliyabêh", date_adhesion: "2025-06-15" }); const all = (await call("members.list", t, {})).data; const uniq = new Set(all.map(m => m.matricule)).size; return { obtenu: "désactivation " + d.status + " ; nouveaux : " + r1.data.matricule + " et " + r2.data.matricule + " ; " + all.length + " fiches pour " + uniq + " matricules distincts", pass: d.status === 200 && r1.data.matricule === "ADLCI-2025-0007" && r2.data.matricule === "ADLCI-2025-0008" && uniq === all.length, detail: "Le compteur par année est monotone ; aucune fiche n'étant jamais supprimée, aucun matricule ne redevient disponible." } } },
+
+  /* ── G2 · Consultation, recherche, filtres ── */
+  { id: "M6", g: 2, titre: "Consultation du registre : réservée au bureau", attendu: "liste complète pour l'administrateur ; 403 pour un membre ordinaire",
+    async fn() { const ta = (await login("s.diallo", "Admin-2026!CI")).data.token; const rA = await call("members.list", ta, {}); const tm = (await login("k.yao", "Membre-2026!CI")).data.token; const rM = await call("members.list", tm, {}); return { obtenu: "admin : " + rA.data.length + " fiches ; membre ordinaire : " + rM.status, pass: rA.status === 200 && rA.data.length >= 12 && rM.status === 403, detail: rM.msg } } },
+  { id: "M7", g: 2, titre: "Recherche par nom, matricule et téléphone (traitée par le serveur)", attendu: "1 résultat chacun : « sanogo » → Ibrahima ; ADLCI-2025-0003 → Aminata ; « 0707 » → Aminata",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const r1 = await call("members.list", t, { q: "sanogo" }); const r2 = await call("members.list", t, { q: "adlci-2025-0003" }); const r3 = await call("members.list", t, { q: "0707" }); const ok = r1.data.length === 1 && r1.data[0].prenom === "Ibrahima" && r2.data.length === 1 && r2.data[0].prenom === "Aminata" && r3.data.length === 1 && r3.data[0].prenom === "Aminata"; return { obtenu: "« sanogo » → " + r1.data.length + " ; matricule → " + r2.data.length + " ; « 0707 » → " + r3.data.length, pass: ok, detail: "La recherche ignore accents, casse et espaces superflus, côté serveur." } } },
+  { id: "M8", g: 2, titre: "Filtres par tribu et par statut, combinables", attendu: "Douayêro → 2 ; inactif → le nombre d'inactifs du registre ; combinaison tribu+inactif → cohérente",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const full = (await call("members.list", t, {})).data; const expD = full.filter(m => m.tribu === "Douayêro").length; const r1 = await call("members.list", t, { tribu: "Douayêro" }); const r2 = await call("members.list", t, { statut: "inactif" }); const r3 = await call("members.list", t, { tribu: "Douayêro", statut: "inactif" }); const expI = full.filter(m => m.statut === "inactif").length; return { obtenu: "Douayêro : " + r1.data.length + "/" + expD + " ; inactifs : " + r2.data.length + "/" + expI + " ; Douayêro inactifs : " + r3.data.length, pass: r1.data.length === expD && r2.data.length === expI && r3.data.length === full.filter(m => m.tribu === "Douayêro" && m.statut === "inactif").length, detail: "Les six tribus sont les seules valeurs acceptées (M3)." } } },
+  { id: "M9", g: 2, titre: "Un membre ne consulte que sa fiche", attendu: "sa fiche → 200 (own) ; la fiche d'un autre → 403",
+    async fn() { const tm = (await login("k.yao", "Membre-2026!CI")).data.token; const rS = await call("members.get", tm, { id: 1 }); const rO = await call("members.get", tm, { id: 5 }); return { obtenu: "sa fiche " + rS.status + " (own=" + (rS.data && rS.data.own) + ") ; autre " + rO.status, pass: rS.status === 200 && rS.data.own === true && rO.status === 403, detail: rO.msg } } },
+  { id: "M10", g: 2, titre: "Export : les données autorisées contiennent les 8 champs demandés, sans champ interne", attendu: "nom, prénom, téléphone, tribu, date d'adhésion, statut, matricule, observations présents ; aucun secret",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const r = await call("members.list", t, {}); const keys = Object.keys(r.data[0]); const need = ["nom", "prenom", "tel", "tribu", "date_adhesion", "statut", "matricule", "observations"]; const missing = need.filter(k => !keys.includes(k)); const leak = keys.filter(k => /hash|salt|token|secret/i.test(k)); const dup = new Set(r.data.map(m => m.matricule)).size !== r.data.length; return { obtenu: "champs : " + keys.join(", ") + (missing.length ? " — MANQUANTS : " + missing.join(", ") : "") + (leak.length ? " — FUITE : " + leak.join(", ") : "") + (dup ? " — matricules dupliqués !" : ""), pass: !missing.length && !leak.length && !dup, detail: "L'export tableur est construit depuis ce même jeu autorisé." } } },
+
+  /* ── G3 · Modification et autorisation ── */
+  { id: "M11", g: 3, titre: "Modification autorisée : secrétaire change téléphone et observations, historique conservé", attendu: "200 ; l'historique montre ancien 0505050506 → nouveau 0505998877 avec auteur et horodatage",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const r = await call("members.update", t, { id: 2, patch: { tel: "0505998877", observations: "Retour annoncé pour la rentrée de janvier." } }); const h = (await call("members.history", t, { id: 2 })).data; const telChange = h.find(x => x.field === "téléphone" && x.old === "0505050506" && x.new === "0505998877"); return { obtenu: "modification " + r.status + " ; historique " + h.length + " événements ; changement de téléphone tracé : " + (telChange ? "oui (" + telChange.actor + ")" : "NON"), pass: r.status === 200 && !!telChange && h.every(x => x.actor && x.ts), detail: "RG-X3 : ancienne et nouvelle valeur conservées, auteur nominatif." } } },
+  { id: "M12", g: 3, titre: "Seul le secrétaire général modifie une fiche", attendu: "403 pour le trésorier et pour le président (supervision seulement)",
+    async fn() { const tt = (await login("a.traore", "Tresor-2026!CI")).data.token; const r1 = await call("members.update", tt, { id: 2, patch: { tel: "0712345678" } }); const tp = (await login("m.kante", "President-2026!")).data.token; const r2 = await call("members.update", tp, { id: 2, patch: { tel: "0712345679" } }); return { obtenu: "trésorier " + r1.status + " ; président " + r2.status, pass: r1.status === 403 && r2.status === 403, detail: "« Modifier avec autorisation » signifie : droit vérifié côté serveur à chaque appel." } } },
+  { id: "M13", g: 3, titre: "Modification invalide refusée avec le motif exact", attendu: "422 pour téléphone non numérique et nom fautif",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const r1 = await call("members.update", t, { id: 2, patch: { tel: "abc" } }); const r2 = await call("members.update", t, { id: 2, patch: { nom: "K5!" } }); return { obtenu: "téléphone " + r1.status + " (" + r1.code + ") ; nom " + r2.status + " (" + r2.code + ")", pass: r1.status === 422 && r2.status === 422 && /téléphone/.test(r1.msg) && /nom/.test(r2.msg), detail: "La fiche d'origine reste inchangée en cas de refus." } } },
+  { id: "M14", g: 3, titre: "Un membre ne peut pas se modifier lui-même", attendu: "403 — l'auto-modification passerait par le secrétaire",
+    async fn() { const tm = (await login("k.yao", "Membre-2026!CI")).data.token; const r = await call("members.update", tm, { id: 1, patch: { tel: "0777777777" } }); return { obtenu: "status " + r.status + " (" + r.code + ")", pass: r.status === 403, detail: "Le registre reste sous la responsabilité d'une seule fonction : traçabilité sans ambiguïté." } } },
+
+  /* ── G4 · Statuts, obligations, historique ── */
+  { id: "M15", g: 4, titre: "Désactivation puis réactivation d'un membre à jour", attendu: "200 dans les deux sens, deux événements d'historique, matricule conservé",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const mat0 = (await call("members.get", t, { id: 6 })).data.matricule; const r1 = await call("members.status", t, { id: 6, statut: "inactif" }); const r2 = await call("members.status", t, { id: 6, statut: "actif" }); const h = (await call("members.history", t, { id: 6 })).data; const evts = h.filter(x => /réactivation|désactivation/.test(x.action)).length; return { obtenu: "désactivation " + r1.status + " ; réactivation " + r2.status + " ; matricule " + mat0 + " conservé ; " + evts + " événements de statut", pass: r1.status === 200 && r2.status === 200 && (await call("members.get", t, { id: 6 })).data.matricule === mat0 && evts >= 2, detail: "La désactivation n'est pas une suppression : la fiche et son matricule restent." } } },
+  { id: "M16", g: 4, titre: "Règle comptable : désactivation refusée sans motif quand des cotisations sont dues", attendu: "422 OBLIGATION_NON_REGLEE citant les 2 mois dus",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const r = await call("members.status", t, { id: 2, statut: "inactif" }); return { obtenu: "status " + r.status + " (" + r.code + ") — " + r.msg.slice(0, 130), pass: r.status === 422 && r.code === "OBLIGATION_NON_REGLEE" && /2 mois/.test(r.msg), detail: "Le serveur connaît les obligations et refuse un changement de statut qui les ignorerait." } } },
+  { id: "M17", g: 4, titre: "Désactivation avec motif : accordée, mais les obligations restent dues", attendu: "200 ; statut inactif ; moisDu toujours 2 ; motif tracé",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const r = await call("members.status", t, { id: 2, statut: "inactif", motif: "Départ annoncé par écrit au bureau" }); const h = (await call("members.history", t, { id: 2 })).data; const motifOk = h.some(x => x.field === "motif" && /Départ annoncé/.test(x.new)); return { obtenu: "status " + r.status + " ; mois dus conservés : " + (r.data && r.data.moisDu) + " ; motif tracé : " + (motifOk ? "oui" : "NON"), pass: r.status === 200 && r.data.moisDu === 2 && r.data.statut === "inactif" && motifOk, detail: "La dette n'est ni effacée ni transférée : elle reste opposable sur la fiche." } } },
+  { id: "M18", g: 4, titre: "Aucune suppression définitive n'existe sur le serveur", attendu: "404 ENDPOINT_INEXISTANT ; la fiche subsiste intacte",
+    async fn() { const t = (await login("s.diallo", "Admin-2026!CI")).data.token; const r = await call("members.delete", t, { id: 2 }); const still = await call("members.get", t, { id: 2 }); return { obtenu: "members.delete → " + r.status + " (" + r.code + ") ; fiche encore présente : " + (still.status === 200 ? "oui (" + still.data.matricule + ")" : "NON"), pass: r.status === 404 && still.status === 200, detail: "Même un administrateur ne peut pas supprimer : l'endpoint n'existe pas, la surface API ne le propose pas." } } },
+  { id: "M19", g: 4, titre: "Le matricule est immuable", attendu: "422 MATRICULE_IMMUTABLE sur tentative de changement",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const r = await call("members.update", t, { id: 2, patch: { matricule: "ADLCI-2030-9999" } }); return { obtenu: "status " + r.status + " (" + r.code + ")", pass: r.status === 422 && r.code === "MATRICULE_IMMUTABLE", detail: r.msg } } },
+  { id: "M20", g: 4, titre: "Historique complet et chronologique", attendu: "la fiche n° 2 présente une chaîne d'événements datés, signés par leur auteur, dans l'ordre",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const h = (await call("members.history", t, { id: 2 })).data; const ordered = h.every((x, i) => i === 0 || new Date(h[i - 1].ts.replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$2-$1")) <= new Date(x.ts.replace(/(\d{2})\/(\d{2})\/(\d{4})/, "$3-$2-$1"))); return { obtenu: h.length + " événements : " + h.map(x => x.action + "/" + (x.field || "")).join(", ") + " — ordre chronologique : " + (ordered ? "oui" : "NON"), pass: h.length >= 4 && h.every(x => x.actor && x.ts) && ordered, detail: "Chaque événement porte l'action, le champ, l'ancienne et la nouvelle valeur, l'auteur et l'horodatage." } } },
+
+  /* ── G5 · Sécurité transversale ── */
+  { id: "M21", g: 5, titre: "Jeton forgé rejeté sur le registre", attendu: "401 + entrée d'audit",
+    async fn() { const r = await call("members.list", "forged" + "b".repeat(56)); return { obtenu: "status " + r.status + " — " + r.msg.slice(0, 90), pass: r.status === 401, detail: r.msg } } },
+  { id: "M22", g: 5, titre: "Charge XSS dans les observations : stockée côté serveur, rendue échappée", attendu: "aucun script exécutable à l'affichage",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const r = await call("members.create", t, { nom: "Voleau", prenom: "Testeur", tel: "0788888888", tribu: "Djigayabêh", date_adhesion: "2026-11-10", observations: '<img src=x onerror=alert(1)>' }); const probe = document.createElement("div"); probe.innerHTML = '<p>' + esc(r.data.observations) + '</p>'; const injected = probe.querySelectorAll("img,script").length; return { obtenu: "stocké : « " + r.data.observations.slice(0, 24) + "… » ; rendu : " + (injected === 0 ? "aucun nœud exécutable" : injected + " nœuds injectés (!)"), pass: r.status === 200 && injected === 0, detail: "Le serveur stocke la valeur ; l'échappement systématique protège l'affichage." } } },
+  { id: "M23", g: 5, titre: "Aucun champ interne ne fuit dans les réponses", attendu: "aucune clé sensible (hash, sel, jeton) sur l'ensemble des fiches",
+    async fn() { const t = (await login("s.diallo", "Admin-2026!CI")).data.token; const r = await call("members.list", t, {}); const keys = new Set(); r.data.forEach(m => Object.keys(m).forEach(k => keys.add(k))); const leak = [...keys].filter(k => /hash|salt|token|secret|pwd/i.test(k)); return { obtenu: leak.length ? "FUITE : " + leak.join(", ") : "aucune fuite sur " + keys.size + " champs exposés", pass: leak.length === 0, detail: "Projection DTO contrôlée, comme pour le module d'authentification." } } },
+  { id: "M24", g: 5, titre: "Journal d'audit : intègre pendant toute la suite, falsification détectée", attendu: "vérification INTÈGRE, puis altération simulée DÉTECTÉE et désignée",
+    async fn() { const t = (await login("s.diallo", "Admin-2026!CI")).data.token; const v1 = await call("audit.verify", t); await call("audit.tamper_demo", t); const v2 = await call("audit.verify", t); return { obtenu: "avant : " + (v1.data.integre ? "intègre (" + v1.data.seq + " entrées)" : "compromise !") + " ; après altération : " + (v2.data.integre ? "non détectée (!)" : "DÉTECTÉE à l'entrée n° " + v2.data.seq), pass: v1.data.integre === true && v2.data.integre === false, detail: "La suite a produit de nombreux événements d'audit concurrents : la chaîne reste intègre (écritures sérialisées)." } } }
+];
+
+async function runBench() {
+  const t0 = performance.now();
+  await SERVER.seed();
+  const out = [];
+  for (const sc of BENCH) {
+    try { const r = await sc.fn(); out.push({ ...sc, ...r }); }
+    catch (e) { out.push({ ...sc, obtenu: "exception : " + e.message, pass: false, detail: "" }); }
+  }
+  const ms = Math.round(performance.now() - t0);
+  const pass = out.filter(r => r.pass).length;
+  BENCH_RESULTS = { date: new Date().toLocaleString("fr-FR"), module: "gestion des membres", total: out.length, pass, fail: out.length - pass, ms, scenarios: out };
+  await doLogout(true, true);
+  await SERVER.seed();
+  renderBench(out, pass, out.length, ms);
+  toast(pass === out.length ? "ok" : "err", pass === out.length ? "Suite complète : " + pass + "/" + out.length + " scénarios conformes." : "Suite terminée avec " + (out.length - pass) + " écart(s) — voir le détail.");
+}
+/* ==================================================================
+   CONSOLE D'INTRUSION
+   ================================================================== */
+const ATTACKS = [
+  { t: "Un membre modifie sa propre fiche", d: "k.yao appelle directement members.update sur sa fiche — l'interface ne lui montre aucun bouton, l'API est attaquée quand même.", async run() { const t = (await login("k.yao", "Membre-2026!CI")).data.token; return await call("members.update", t, { id: 1, patch: { tel: "0777777777" } }); } },
+  { t: "Le trésorier désactive un membre", d: "Le changement de statut est réservé au secrétaire général.", async run() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; return await call("members.status", t, { id: 6, statut: "inactif", motif: "Tentative hors de mon périmètre" }); } },
+  { t: "Supprimer définitivement un membre", d: "Même l'administrateur tente members.delete — cet endpoint n'existe pas.", async run() { const t = (await login("s.diallo", "Admin-2026!CI")).data.token; return await call("members.delete", t, { id: 2 }); } },
+  { t: "Lister le registre avec un jeton forgé", d: "Un jeton inventé est présenté comme session valide.", async run() { return await call("members.list", "forged-" + crypto.getRandomValues(new Uint8Array(16)).join("")); } }
+];
+
+/* ==================================================================
+   INTERFACE CLIENT — présentation uniquement, aucune sécurité ici
+   ================================================================== */
+const $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
+function toast(kind, msg) { const t = document.createElement("div"); t.className = "toast " + (kind === "ok" ? "ok" : kind === "err" ? "err" : ""); t.textContent = msg; $("#toasts").appendChild(t); setTimeout(() => { t.style.opacity = "0"; t.style.transition = "opacity .4s"; setTimeout(() => t.remove(), 400); }, 4200); }
+const initials = n => String(n).split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
+
+let SESSION = { token: null, user: null, perms: [] };
+let CURRENT = { id: null, data: null };
+const TABS = [
+  { id: "membres", label: "Registre", perm: "members.view_all" },
+  { id: "journal", label: "Journal d'audit", perm: "audit.view" },
+  { id: "bench", label: "Banc de tests", always: true },
+  { id: "intrusion", label: "Console d'intrusion", always: true },
+  { id: "archi", label: "Production & limites", always: true }
+];
+function buildNav() {
+  const nav = $("#topnav"); nav.innerHTML = "";
+  if (!SESSION.token) { nav.innerHTML = '<button class="on" data-tab="login">Connexion</button>'; $$("#topnav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab))); return; }
+  const vis = TABS.filter(t => t.always || (t.perm && SESSION.perms.includes(t.perm)));
+  nav.innerHTML = vis.map((t, i) => '<button data-tab="' + t.id + '"' + (i === 0 ? ' class="on"' : "") + ">" + t.label + "</button>").join("");
+  $$("#topnav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+  showTab(vis[0].id);
+}
+function showTab(id) {
+  $$(".tab").forEach(v => v.classList.remove("on"));
+  const el = $("#v-" + id); if (el) el.classList.add("on");
+  $$("#topnav button").forEach(b => b.classList.toggle("on", b.dataset.tab === id));
+  window.scrollTo({ top: 0 });
+  if (id === "membres") renderMembres();
+  if (id === "journal") renderJournal();
+  if (id === "intrusion") renderAttacks();
+  if (id === "archi") renderArchi();
+}
+
+/* ── Registre : liste, recherche, filtres, export ── */
+async function renderMembres() {
+  if (!SESSION.perms.includes("members.view_all")) { showMyFiche(); return; }
+  const canWrite = SESSION.perms.includes("members.create");
+  $("#membres-actions").style.display = "flex";
+  $("#btn-member-new").style.display = canWrite ? "" : "none";
+  $("#membres-sub").textContent = canWrite
+    ? "Le secrétaire général adhère et modifie les membres ; tout est vérifié et tracé côté serveur. La recherche et les filtres sont appliqués par le serveur."
+    : "Lecture selon votre rôle : le registre est modifiable par le secrétaire général uniquement (vérifié côté serveur à chaque appel).";
+  const filters = { q: $("#q").value.trim(), tribu: $("#f-tribu").value, statut: $("#f-statut").value };
+  const [rFull, rF] = await Promise.all([
+    SERVER.api({ endpoint: "members.list", token: SESSION.token, body: {} }),
+    SERVER.api({ endpoint: "members.list", token: SESSION.token, body: filters })
+  ]);
+  if (rF.status !== 200) { doLogout(true); return; }
+  const full = rFull.data;
+  const actifs = full.filter(m => m.statut === "actif").length, dus = full.reduce((s, m) => s + m.moisDu, 0);
+  $("#k-show").textContent = rF.data.length + "/" + full.length;
+  $("#k-actifs").textContent = actifs; $("#k-inactifs").textContent = full.length - actifs;
+  $("#k-dus").textContent = dus + " mois";
+  $("#members-tbl tbody").innerHTML = rF.data.map(m => "<tr>"
+    + '<td data-l="Membre"><div class="cell-name"><span class="ava">' + initials(m.prenom + " " + m.nom) + '</span><span class="n"><b>' + esc(m.nom + " " + m.prenom) + "</b><small>" + esc(m.date_adhesion) + "</small></span></div></td>"
+    + '<td data-l="Matricule"><span class="mat">' + esc(m.matricule) + "</span></td>"
+    + '<td data-l="Tribu">' + esc(m.tribu) + "</td>"
+    + '<td data-l="Téléphone" class="num">' + esc(m.tel) + "</td>"
+    + '<td data-l="Adhésion">' + esc(m.date_adhesion) + "</td>"
+    + '<td data-l="Statut"><span class="tag ' + (m.statut === "actif" ? "ok" : "bad") + '">' + (m.statut === "actif" ? "Actif" : "Inactif") + "</span></td>"
+    + '<td data-l="Cotisations">' + (m.moisDu ? '<span class="tag warn">' + m.moisDu + " mois dus</span>" : '<span class="tag ok">À jour</span>') + "</td>"
+    + '<td class="act"><button class="btn ghost sm" data-fiche="' + m.id + '">Fiche</button></td></tr>').join("");
+  $$("#members-tbl [data-fiche]").forEach(b => b.addEventListener("click", () => openFiche(+b.dataset.fiche)));
+  $("#membres-note").innerHTML = rF.data.length === full.length ? "" : '<div class="note info"><span>🔎</span><span><b>' + rF.data.length + " fiche(s) sur " + full.length + " correspondent aux critères</b> — recherche et filtres appliqués par le serveur ; l'export ne porte que sur ce sous-ensemble.</span></div>";
+  CURRENT.listCache = rF.data;
+}
+async function exportCSV() {
+  const filters = { q: $("#q").value.trim(), tribu: $("#f-tribu").value, statut: $("#f-statut").value };
+  const r = await SERVER.api({ endpoint: "members.list", token: SESSION.token, body: filters });
+  /* Neutralisation de l'injection de formules tableur (=, +, @, tabulation,
+     RC ; tiret suivi d'autre chose qu'un chiffre). Un nombre négatif reste
+     numérique : "-1000" n'est pas préfixé. */
+  const safe = v => { const s = String(v == null ? "" : v); return (/^[=+@\t\r]/.test(s) || /^-[^0-9.]/.test(s)) ? "'" + s : s; };
+  const q = v => '"' + safe(v).replace(/"/g, '""') + '"';
+  const head = ["Nom", "Prénom", "Téléphone", "Tribu", "Date d'adhésion", "Statut", "Matricule", "Observations"];
+  const lines = [head.join(";")].concat(r.data.map(m => [m.nom, m.prenom, m.tel, m.tribu, m.date_adhesion, m.statut, m.matricule, m.observations].map(q).join(";")));
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "adl-ci_membres.csv"; a.click();
+  toast("ok", "Export tableur : " + r.data.length + " fiche(s) — sous-ensemble autorisé et filtré.");
+}
+
+/* ── Fiche membre ── */
+async function openFiche(id) {
+  const r = await SERVER.api({ endpoint: "members.get", token: SESSION.token, body: { id } });
+  if (r.status !== 200) { toast("err", r.msg); return; }
+  CURRENT.id = id; CURRENT.data = r.data;
+  const canEdit = SESSION.perms.includes("members.update");
+  $("#fiche-title").textContent = "Fiche " + r.data.matricule;
+  $("#fiche-statut").innerHTML = '<span class="tag ' + (r.data.statut === "actif" ? "ok" : "bad") + '">' + (r.data.statut === "actif" ? "Actif" : "Inactif") + "</span>";
+  $("#fiche-infos").innerHTML =
+    "<dt>Nom</dt><dd><b>" + esc(r.data.nom) + "</b></dd><dt>Prénom</dt><dd>" + esc(r.data.prenom) + "</dd>"
+    + "<dt>Matricule</dt><dd><span class='mat'>" + esc(r.data.matricule) + "</span> — attribué par le serveur, immuable</dd>"
+    + "<dt>Téléphone</dt><dd>" + esc(r.data.tel) + "</dd>"
+    + "<dt>Tribu</dt><dd>" + esc(r.data.tribu) + "</dd>"
+    + "<dt>Date d'adhésion</dt><dd>" + esc(r.data.date_adhesion) + "</dd>"
+    + "<dt>Observations</dt><dd>" + (r.data.observations ? esc(r.data.observations) : "<i style='color:var(--ink-3)'>aucune</i>") + "</dd>";
+  $("#fiche-engagement").innerHTML =
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px"><span class="tag gold">Score d\'engagement : ' + Number(r.data.score).toFixed(1).replace(".", ",") + " / 100</span>"
+    + (r.data.moisDu ? '<span class="tag warn">' + r.data.moisDu + " mois de cotisation dus</span>" : '<span class="tag ok">Cotisations à jour</span>') + "</div>"
+    + '<p style="font-size:13px;color:var(--ink-2)">Les obligations déjà enregistrées restent dues même en cas de désactivation : le serveur refuse tout changement de statut qui les ignorerait (testé par le banc M16-M17).</p>';
+  $("#fiche-actions").style.display = "flex";
+  $("#btn-fiche-edit").style.display = canEdit ? "" : "none";
+  $("#btn-fiche-status").style.display = SESSION.perms.includes("members.status") ? "" : "none";
+  $("#btn-fiche-status").textContent = r.data.statut === "actif" ? "Désactiver" : "Réactiver";
+  showTab("fiche");
+  const h = await SERVER.api({ endpoint: "members.history", token: SESSION.token, body: { id } });
+  $("#hist-tbl tbody").innerHTML = h.status === 200 && h.data.length ? h.data.map(x => "<tr>"
+    + '<td data-l="Quand">' + esc(x.ts) + "</td>"
+    + '<td data-l="Qui">' + esc(x.actor) + "</td>"
+    + '<td data-l="Action"><b>' + esc(x.action) + (x.field ? " · " + esc(x.field) : "") + "</b></td>"
+    + '<td data-l="Détail">' + esc((x.old === "—" || x.old === undefined ? "" : "« " + x.old + " » → ") + "« " + x.new + " »") + "</td></tr>").join("")
+    : '<tr><td colspan="4" style="color:var(--ink-3)">Aucun événement tracé pour cette fiche.</td></tr>';
+}
+async function showMyFiche() {
+  const me = await SERVER.api({ endpoint: "members.view_self", token: SESSION.token });
+  if (me.data && me.data.id) { openFiche(me.data.id); }
+  else {
+    $$(".tab").forEach(v => v.classList.remove("on"));
+    $("#v-membres").classList.add("on");
+    $("#v-membres .head h1").textContent = "Mon espace";
+    $("#members-tbl tbody").innerHTML = '<tr><td style="color:var(--ink-3)">' + esc(me.msg) + " — votre compte de gestion n'a pas de fiche membre. Les fonctionnalités de registre sont réservées au bureau.</td></tr>";
+    $("#members-tbl tbody").innerHTML = '<tr><td colspan="8" style="color:var(--ink-3);padding:22px">' + esc(me.msg) + " — votre compte de gestion n'a pas de fiche membre : le registre détaillé est réservé au bureau.</td></tr>";
+    $("#k-show").textContent = "—"; $("#k-actifs").textContent = "—"; $("#k-inactifs").textContent = "—"; $("#k-dus").textContent = "—";
+  }
+}
+
+/* ── Formulaires créer / modifier ── */
+function openForm(mode) {
+  $("#v-form").classList.add("on");
+  ["v-membres", "v-fiche"].forEach(v => $("#" + v).classList.remove("on"));
+  $("#form-result").innerHTML = "";
+  ["nom", "prenom", "tel", "obs"].forEach(f => { $("#f-" + f).classList.remove("err"); $("#" + f).value = ""; });
+  ["f-nom", "f-prenom", "f-tel", "f-tribu", "f-date"].forEach(f => $("#" + f).classList.remove("err"));
+  if (mode === "create") {
+    CURRENT.mode = "create"; CURRENT.id = null;
+    $("#form-title").textContent = "Adhérer un membre";
+    $("#form-sub").textContent = "Le matricule est attribué par le serveur au format ADLCI-AAAA-0001 (séquence de l'année d'adhésion). Aucun matricule n'est jamais réutilisé. Les doublons nom + prénom sont refusés.";
+    $("#f-statut-new").style.display = "block";
+    $("#date_adh").value = new Date().toISOString().slice(0, 10);
+  } else {
+    CURRENT.mode = "update";
+    $("#form-title").textContent = "Modifier " + CURRENT.data.nom + " " + CURRENT.data.prenom;
+    $("#form-sub").textContent = "Autorisation vérifiée par le serveur ; chaque champ modifié est tracé avec son ancienne et sa nouvelle valeur, ainsi que votre nom d'utilisateur.";
+    $("#f-statut-new").style.display = "none";
+    $("#nom").value = CURRENT.data.nom; $("#prenom").value = CURRENT.data.prenom;
+    $("#tel").value = CURRENT.data.tel; $("#tribu").value = CURRENT.data.tribu;
+    $("#date_adh").value = CURRENT.data.date_adhesion; $("#obs").value = CURRENT.data.observations || "";
+  }
+}
+async function submitForm() {
+  const body = { nom: $("#nom").value.trim(), prenom: $("#prenom").value.trim(), tel: $("#tel").value.trim(), tribu: $("#tribu").value, date_adhesion: $("#date_adh").value, observations: $("#obs").value.trim() };
+  let ok = true;
+  [["f-nom", body.nom], ["f-prenom", body.prenom], ["f-tel", body.tel], ["f-tribu", body.tribu], ["f-date", body.date_adhesion]].forEach(([f, v]) => { $("#" + f).classList.toggle("err", !v); if (!v) ok = false; });
+  if (!ok) return;
+  const r = CURRENT.mode === "create"
+    ? await SERVER.api({ endpoint: "members.create", token: SESSION.token, body })
+    : await SERVER.api({ endpoint: "members.update", token: SESSION.token, body: { id: CURRENT.id, patch: body } });
+  $("#form-result").innerHTML = '<div class="note ' + (r.status === 200 ? "ok" : "err") + '"><span>' + (r.status === 200 ? "✓" : "⚠️") + "</span><span><b>" + esc(r.msg) + "</b>" + (r.auditId ? " (journal n° " + r.auditId + ")" : "") + "</span></div>";
+  if (r.status === 200) {
+    toast("ok", CURRENT.mode === "create" ? "Adhésion enregistrée — " + r.data.matricule : "Fiche mise à jour et tracée au journal.");
+    CURRENT.data = r.data; CURRENT.id = r.data.id;
+    setTimeout(() => { renderMembres(); showTab("membres"); }, 1200);
+  } else toast("err", r.msg);
+}
+
+/* ── Statut ── */
+async function toggleStatus() {
+  const target = CURRENT.data.statut === "actif" ? "inactif" : "actif";
+  let motif = "";
+  if (target === "inactif") motif = prompt("Motif de la désactivation (obligatoire d'au moins 10 caractères si ce membre a des cotisations dues — les obligations restent dues après désactivation) :") || "";
+  if (target === "inactif" && !motif) { toast("err", "Désactivation annulée : un motif est nécessaire pour garder la trace de la décision."); return; }
+  const r = await SERVER.api({ endpoint: "members.status", token: SESSION.token, body: { id: CURRENT.id, statut: target, motif } });
+  toast(r.status === 200 ? "ok" : "err", r.msg);
+  if (r.status === 200) { CURRENT.data = r.data; openFiche(CURRENT.id); }
+  else openFiche(CURRENT.id);
+}
+
+/* ── Journal, banc, intrusion, archi ── */
+async function renderJournal() {
+  if (!SESSION.perms.includes("audit.view")) return;
+  const r = await SERVER.api({ endpoint: "audit.list", token: SESSION.token });
+  $("#audit-tbl tbody").innerHTML = (r.data || []).slice(-70).reverse().map(e => "<tr>"
+    + '<td data-l="#">' + e.seq + "</td><td data-l='Horodatage'>" + esc(e.ts) + "</td>"
+    + '<td data-l="Auteur">' + esc(e.actor) + ' <small style="color:var(--ink-3)">' + esc(e.role) + "</small></td>"
+    + '<td data-l="Action"><b style="font-size:12px">' + esc(e.action) + "</b></td>"
+    + '<td data-l="Détail">' + esc(e.detail) + "</td>"
+    + '<td data-l="Niveau"><span class="tag ' + (e.level === "BLOCAGE" ? "bad" : e.level === "ALERTE" ? "warn" : "neutral") + '">' + e.level + "</span></td></tr>").join("");
+  $("#btn-audit-verify").onclick = async () => {
+    const v = await SERVER.api({ endpoint: "audit.verify", token: SESSION.token });
+    $("#audit-verify-result").innerHTML = '<div class="note ' + (v.data.integre ? "ok" : "err") + '"><span>' + (v.data.integre ? "✓" : "⚠️") + "</span><span><b>" + esc(v.msg) + "</b> " + esc(v.data.motif || "") + "</span></div>";
+    toast(v.data.integre ? "ok" : "err", v.msg);
+  };
+}
+function renderBench(out, pass, total, ms) {
+  $("#bs-total").textContent = total; $("#bs-pass").textContent = pass; $("#bs-fail").textContent = total - pass; $("#bs-time").textContent = ms + " ms";
+  const GROUPS = { 1: "G1 — Matricules et création", 2: "G2 — Consultation, recherche, filtres et export", 3: "G3 — Modification et autorisation", 4: "G4 — Statuts, obligations comptables, historique", 5: "G5 — Sécurité transversale" };
+  let html = "";
+  for (const g of [1, 2, 3, 4, 5]) {
+    html += '<div class="grp-h">' + GROUPS[g] + "</div>";
+    for (const sc of out.filter(x => x.g === g)) {
+      html += '<details class="sc"><summary><span class="verdict ' + (sc.pass ? "p" : "f") + '">' + (sc.pass ? "✓ PASS" : "✗ ÉCART") + "</span><b>" + sc.id + " · " + esc(sc.titre) + "</b></summary>"
+        + '<div class="body"><b>Attendu :</b> ' + esc(sc.attendu) + "<br><b>Obtenu :</b> " + esc(sc.obtenu) + (sc.detail ? "<br>" + esc(sc.detail) : "") + "</div></details>";
+    }
+  }
+  html += '<div class="note ' + (pass === total ? "ok" : "err") + '" style="margin-top:14px"><span>' + (pass === total ? "✓" : "⚠️") + "</span><span><b>" + (pass === total ? "Suite complète conforme : " + pass + "/" + total + " scénarios." : pass + "/" + total + " scénarios conformes — examinez les écarts.") + " Les données fictives ont été réinitialisées après l'exécution.</span></div>";
+  $("#bench-results").innerHTML = html;
+}
+function renderAttacks() {
+  $("#attacks").innerHTML = ATTACKS.map((a, i) => '<div class="attack"><div class="desc"><b>' + (i + 1) + " · " + esc(a.t) + "</b><small>" + esc(a.d) + '</small></div><button class="btn danger sm" data-atk="' + i + '">Lancer l\'attaque</button></div>').join("");
+  $$("#attacks [data-atk]").forEach(b => b.addEventListener("click", async () => {
+    const a = ATTACKS[+b.dataset.atk];
+    const r = await a.run();
+    const cls = r.status >= 500 ? "g" : r.status >= 400 ? "r" : "k";
+    $("#console-out").innerHTML += "\n\n<span class='g'>» " + esc(a.t) + "</span>\n<span class='" + cls + "'>HTTP " + r.status + " · " + esc(r.code) + "</span>\n<span class='k'>Serveur :</span> " + esc(r.msg) + (r.auditId ? "\n<span class='g'>Journal :</span> entrée n° " + r.auditId : "");
+    $("#console-out").scrollTop = 1e9;
+    toast(r.status >= 400 ? "ok" : "warn", r.status >= 400 ? "Refus du serveur (HTTP " + r.status + ") — journal n° " + r.auditId + "." : "Réponse reçue (HTTP " + r.status + ").");
+    if (SESSION.perms.includes("audit.view")) renderJournal();
+  }));
+}
+function renderArchi() {
+  const MAP = [
+    ["Matricule ADLCI-AAAA-NNNN attribué par le serveur, séquence par année", "Séquence PostgreSQL par année (table compteur + contrainte UNIQUE) ; attribution dans la transaction d'adhésion", "UNIQUE sur matricule + compteur monotone"],
+    ["Dédoublonnage par comparaison normalisée (accents, casse, espaces)", "Contrainte d'unicité sur colonne générée (nom_norm + prenom_norm) + index", "Refus en base même si l'API était contournée"],
+    ["Historique champ par champ (ancien → nouveau, auteur, horodatage)", "Table member_history en INSERT-only + déclencheur PostgreSQL sur UPDATE", "La table ne peut que s'enrichir"],
+    ["Désactivation avec obligations non réglées exige un motif", "Policies + validation métier dans la route ; dette conservée en base", "Aucun endpoint n'efface une dette"],
+    ["Pas de suppression définitive (endpoint inexistant)", "Aucune route DELETE ; PostgreSQL sans droit DELETE au rôle applicatif", "REVOKE DELETE au rôle applicatif"],
+    ["Permissions vérifiées à chaque appel", "Middleware Express requirePerm() sur toutes les routes membres", "Aucune route sans middleware"],
+    ["Journal chaîné SHA-256", "Table audit append-only + déclencheur anti-UPDATE ; export mensuel hors système (RG-X5)", "REVOKE UPDATE/DELETE sur audit_log"],
+    ["Export tableur du sous-ensemble autorisé et filtré", "Génération côté serveur (CSV/Excel) dans les mêmes limites de permission", "L'export passe par la même permission que la liste"]
+  ];
+  $("#map-body").innerHTML = MAP.map(m => "<tr><td data-l='Prototype'>" + esc(m[0]) + '</td><td data-l="Production">' + esc(m[1]) + '</td><td data-l="Verrou">' + esc(m[2]) + "</td></tr>").join("");
+  const FLAWS = [
+    ["1", "Le « serveur » vit dans le navigateur : la séparation client-serveur est une simulation fidèle mais non opposable hors du navigateur.", "Serveur distant Node.js + Express (AT-1) ; le prototype reste la spécification de référence."],
+    ["2", "La recherche et les filtres sont côté serveur, mais l'export est construit côté client à partir des données déjà autorisées.", "En production, l'export est généré par le serveur avec la même permission et les mêmes filtres."],
+    ["3", "Le score d'engagement et les mois dus sont des données de démonstration, non reliées au futur module financier.", "Ils seront calculés depuis le registre des cotisations du module financier, pas stockés sur la fiche."],
+    ["4", "Le journal et le registre sont en mémoire : tout se perd à l'actualisation.", "Table PostgreSQL + sauvegardes quotidiennes de l'hébergeur (30 jours) + export mensuel hors système."],
+    ["5", "Les doublons sont détectés sur nom + prénom ; deux homonymes parfaits légitimes exigeraient un geste manuel.", "En production : procédure « homonyme confirmé » tracée au journal, avec distinction par téléphone et matricule."]
+  ];
+  $("#flaws-body").innerHTML = FLAWS.map(f => "<tr><td data-l='#'>" + f[0] + '</td><td data-l="Constat">' + esc(f[1]) + '</td><td data-l="Traitement">' + esc(f[2]) + "</td></tr>").join("");
+  $("#rules-list").innerHTML = [
+    "Un matricule ADLCI-AAAA-NNNN par membre, attribué par le serveur, immuable, jamais réutilisé — même après désactivation.",
+    "Aucune suppression définitive : l'endpoint n'existe pas ; la désactivation est le seul chemin de sortie du statut actif.",
+    "Les doublons nom + prénom (accents et casse normalisés) sont refusés en citant le matricule existant.",
+    "Toute modification est tracée : champ, ancienne valeur, nouvelle valeur, auteur, horodatage (RG-X3).",
+    "Désactiver un membre avec des cotisations dues exige un motif ; la dette reste due et visible — elle n'est jamais effacée.",
+    "Le secrétaire général écrit le registre ; le bureau consulte selon son périmètre ; un membre ne voit que sa fiche."
+  ].map(t => '<div style="display:flex;gap:9px"><span style="color:var(--primary);font-weight:700">§</span><span>' + esc(t) + "</span></div>").join("");
+}
+
+/* ── Connexion / déconnexion ── */
+function lgErr(msg) { $("#lg-err-txt").textContent = msg; $("#lg-err").classList.add("on"); }
+$("#login-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("#lg-err").classList.remove("on");
+  const u = $("#lg-user").value.trim(), p = $("#lg-pass").value;
+  if (!u) { $("#f-lg-user").classList.add("err"); return; }
+  if (!p) { $("#f-lg-pass").classList.add("err"); return; }
+  const b = $("#lg-submit"); b.classList.add("busy"); b.disabled = true;
+  const r = await SERVER.api({ endpoint: "auth.login", body: { user: u, pass: p } });
+  b.classList.remove("busy"); b.disabled = false;
+  if (r.status !== 200) { lgErr(r.msg); return; }
+  SESSION = { token: r.data.token, user: r.data.user, perms: r.data.perms };
+  $("#top-who").style.display = "flex";
+  $("#top-name").textContent = SESSION.user.nom; $("#top-role").textContent = SESSION.user.roleLabel; $("#top-ava").textContent = initials(SESSION.user.nom);
+  $("#v-login").classList.remove("on"); $("#v-appzone").style.display = "block";
+  $("#lg-pass").value = "";
+  buildNav();
+  toast("ok", r.msg);
+});
+async function doLogout(expired, silent) {
+  if (SESSION.token && !expired) await SERVER.api({ endpoint: "auth.logout", token: SESSION.token });
+  SESSION = { token: null, user: null, perms: [] };
+  CURRENT = { id: null, data: null };
+  $("#top-who").style.display = "none"; $("#v-appzone").style.display = "none"; $("#v-login").classList.add("on");
+  buildNav();
+  if (!silent) toast("info", expired ? "Votre session a expiré — reconnectez-vous." : "Session fermée. À bientôt !");
+}
+$("#btn-logout").addEventListener("click", () => doLogout(false));
+$("#btn-member-new").addEventListener("click", () => openForm("create"));
+$("#btn-export").addEventListener("click", exportCSV);
+$("#btn-fiche-back").addEventListener("click", () => showTab("membres"));
+$("#btn-fiche-edit").addEventListener("click", () => openForm("update"));
+$("#btn-fiche-status").addEventListener("click", toggleStatus);
+$("#form-cancel").addEventListener("click", () => { renderMembres(); showTab("membres"); });
+$("#form-submit").addEventListener("click", submitForm);
+$("#q").addEventListener("input", () => { clearTimeout(window.__qt); window.__qt = setTimeout(renderMembres, 350); });
+$("#f-tribu").addEventListener("change", renderMembres);
+$("#f-statut").addEventListener("change", renderMembres);
+$("#btn-reset").addEventListener("click", () => { $("#q").value = ""; $("#f-tribu").value = ""; $("#f-statut").value = ""; renderMembres(); });
+$("#btn-bench-run").addEventListener("click", () => { $("#bench-results").innerHTML = '<div class="note info"><span>⏳</span><span>Suite en cours — quelques secondes (dérivations PBKDF2 incluses)…</span></div>'; setTimeout(runBench, 50); });
+$("#btn-bench-export").addEventListener("click", () => {
+  if (!BENCH_RESULTS.length) { toast("err", "Lancez d'abord la suite de tests."); return; }
+  const blob = new Blob([JSON.stringify(BENCH_RESULTS, null, 2)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "adl-ci_tests_module_membres.json"; a.click();
+});
+$("#btn-console-clear").addEventListener("click", () => { $("#console-out").textContent = "Console effacée."; });
+
+/* ── Amorçage ── */
+(async () => {
+  await SERVER.seed();
+  const sel = $("#f-tribu");
+  SERVER.TRIBUS.forEach(t => { const o = document.createElement("option"); o.value = t; o.textContent = t; sel.appendChild(o); });
+  const sel2 = $("#tribu");
+  SERVER.TRIBUS.forEach(t => { const o = document.createElement("option"); o.value = t; o.textContent = t; sel2.appendChild(o); });
+  buildNav();
+  showTab("login");
+  renderAttacks(); renderArchi();
+})();
+
+
+</script>
+
+</body>
+</html>

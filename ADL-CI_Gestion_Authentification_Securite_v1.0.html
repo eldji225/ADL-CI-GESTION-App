@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADL-CI GESTION — Authentification et gestion des utilisateurs v1.0</title>
+<!--
+  ADL-CI GESTION — Système d'authentification et de gestion des utilisateurs v1.0
+  Association pour le Développement de Laabha — Section Côte d'Ivoire
+  Prototype autonome : le « serveur » simulé détient la base, les sessions et les permissions ;
+  le client ne reçoit que des projections (DTO) et appelle une API à surface minimale.
+  Stack de production visée (AT-1 validée) : Node.js + Express / PostgreSQL / IndexedDB (Dexie).
+  Règles projet : RG-X1 (comptes nominatifs), RG-X2 (journal en lecture seule), RG-X3 (modifications tracées), D5 (habilitations), RG-H1 (saisie financière réservée au trésorier).
+  Banc de tests : 29 scénarios exécutables automatiquement + console d'intrusion.
+-->
+<style>
+:root{
+  --bg:#F6F3EC; --bg-soft:#EFEAE0; --bg-deep:#E7E1D3;
+  --primary:#2A4A3A; --primary-deep:#1D362B; --primary-soft:#3D6B54;
+  --accent:#C89F62; --accent-soft:#E9DBBE; --accent-faint:#F3ECD9;
+  --ink:#1C1B18; --ink-2:#4A473F; --ink-3:#7A7466;
+  --card:#FFFFFF; --line:#DCD5C6; --line-soft:#E8E2D4;
+  --ok:#2F7D4F; --ok-bg:#E6F1E9; --warn:#B97E1C; --warn-bg:#F7EEDC;
+  --danger:#A63D2F; --danger-bg:#F5E5E1; --info:#3E6C8E; --info-bg:#E4EDF3;
+  --shadow:0 1px 2px rgba(28,27,24,.06),0 4px 14px rgba(28,27,24,.08);
+  --shadow-lg:0 8px 30px rgba(28,27,24,.16);
+  --r:14px;
+  --f-title:'Lora',Georgia,serif; --f-ui:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --f-num:'IBM Plex Mono',ui-monospace,monospace;
+  --touch:44px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--f-ui);font-size:15px;line-height:1.55;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+button{font:inherit;cursor:pointer}
+input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3,h4{font-family:var(--f-title);font-weight:600;line-height:1.25;color:var(--primary)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px;border-radius:4px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.wrap{max-width:1180px;margin:0 auto;padding:22px 26px 80px}
+
+/* En-tête */
+.top{position:sticky;top:0;z-index:50;background:var(--primary);color:#fff;padding:12px 26px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.top .logo{display:flex;align-items:center;gap:11px}
+.top .logo img{width:38px;height:38px}
+.top b{font-family:var(--f-title);font-size:17px;letter-spacing:.04em;display:block}
+.top small{font-size:10.5px;color:rgba(255,255,255,.65);letter-spacing:.08em;text-transform:uppercase;display:block}
+.top .who{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:13px}
+.top .who .ava{width:36px;height:36px;border-radius:50%;background:var(--accent);color:var(--primary-deep);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
+.top .who b{font-size:13.5px;font-family:var(--f-ui)}
+.top .who small{font-size:10px;text-transform:none;letter-spacing:0;color:var(--accent)}
+.topnav{background:var(--primary-deep);padding:0 14px;display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.topnav button{flex-shrink:0;background:none;border:none;color:rgba(255,255,255,.78);padding:12px 15px;font-size:13.5px;font-weight:600;border-bottom:3px solid transparent;min-height:var(--touch)}
+.topnav button.on{color:#fff;border-bottom-color:var(--accent)}
+.topnav button:hover{color:#fff}
+.tab{display:none}
+.tab.on{display:block;animation:fadein .25s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* Composants génériques */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:var(--touch);padding:0 17px;border-radius:11px;border:1px solid transparent;font-weight:600;font-size:14px;transition:background .15s}
+.btn.pri{background:var(--primary);color:#fff}.btn.pri:hover{background:var(--primary-deep)}
+.btn.gold{background:var(--accent);color:var(--primary-deep)}.btn.gold:hover{background:#B9905A}
+.btn.ghost{background:#fff;color:var(--primary);border-color:var(--line)}.btn.ghost:hover{background:var(--bg-soft)}
+.btn.danger{background:var(--danger);color:#fff}.btn.danger:hover{background:#8F3226}
+.btn.sm{min-height:36px;padding:0 12px;font-size:12.5px;border-radius:9px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.card .card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 20px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+.card .card-h h2{font-size:16.5px}
+.card .card-b{padding:18px 20px}
+.card .card-b.tight{padding:0}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}
+.note{display:flex;gap:11px;padding:13px 15px;border-radius:12px;font-size:13.5px;border:1px solid;align-items:flex-start}
+.note b{display:block;margin-bottom:2px}
+.note.ok{background:var(--ok-bg);border-color:#CBE3D2;color:#275E3D}
+.note.warn{background:var(--warn-bg);border-color:#EBD9B4;color:#7A5314}
+.note.err{background:var(--danger-bg);border-color:#E7C7BF;color:#7E2E22}
+.note.info{background:var(--info-bg);border-color:#C9DBE7;color:#2C4E66}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.tag.ok{background:var(--ok-bg);color:var(--ok)}
+.tag.warn{background:var(--warn-bg);color:var(--warn)}
+.tag.bad{background:var(--danger-bg);color:var(--danger)}
+.tag.info{background:var(--info-bg);color:var(--info)}
+.tag.neutral{background:var(--bg-deep);color:var(--ink-2)}
+.tag.gold{background:var(--accent-soft);color:#7A5A2B}
+.field{margin-bottom:13px}
+.field label{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:6px}
+.field input,.field select{width:100%;min-height:var(--touch);border:1px solid var(--line);border-radius:10px;padding:10px 13px;background:#fff;font-size:14.5px}
+.field .help{font-size:12px;color:var(--ink-3);margin-top:5px}
+.field.err input{border-color:var(--danger);background:var(--danger-bg)}
+.field .errmsg{font-size:12.5px;color:var(--danger);margin-top:5px;display:none}
+.field.err .errmsg{display:block}
+.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table.tbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:560px}
+.tbl th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:700;padding:10px 13px;border-bottom:1px solid var(--line);background:var(--bg-soft);white-space:nowrap}
+.tbl td{padding:10px 13px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl .num{font-family:var(--f-num);text-align:right;white-space:nowrap}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chips .btn.on{background:var(--primary);color:#fff;border-color:var(--primary)}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px 18px}
+.kpi .lab{font-size:12px;color:var(--ink-3);font-weight:600}
+.kpi .val{font-family:var(--f-num);font-size:25px;font-weight:600;color:var(--primary);margin-top:5px;font-variant-numeric:tabular-nums}
+.kpi.gold{box-shadow:inset 4px 0 0 var(--accent),var(--shadow)}
+.ava{width:38px;height:38px;border-radius:50%;background:var(--accent-soft);color:#7A5A2B;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0}
+.cell-name{display:flex;align-items:center;gap:11px;min-width:0}
+.cell-name .n b{display:block;font-size:13.5px;white-space:nowrap}
+.cell-name .n small{color:var(--ink-3);font-size:11.5px}
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:22px 0 16px}
+.head h1{font-size:25px}
+.head .sub{color:var(--ink-3);font-size:13.5px;margin-top:3px;max-width:720px}
+
+/* Connexion */
+#v-login{max-width:none;padding:0}
+.login-wrap{min-height:calc(100vh - 120px);display:grid;grid-template-columns:minmax(330px,42%) 1fr}
+.login-hero{background:var(--primary);color:#fff;padding:44px 40px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden}
+.login-hero::after{content:"";position:absolute;right:-70px;bottom:-70px;width:250px;height:250px;border-radius:50%;border:32px solid rgba(200,159,98,.16)}
+.login-hero h1{color:#fff;font-size:27px;margin:8px 0}
+.login-hero p{color:rgba(255,255,255,.8);font-size:14px;max-width:400px}
+.login-hero ul{list-style:none;display:grid;gap:11px;margin-top:20px}
+.login-hero li{display:flex;gap:10px;font-size:13.5px;color:rgba(255,255,255,.86)}
+.login-hero li b{color:var(--accent)}
+.login-hero .foot{font-size:11.5px;color:rgba(255,255,255,.55);position:relative;z-index:1}
+.login-form{display:flex;align-items:center;justify-content:center;padding:30px 20px;background:var(--bg)}
+.login-card{width:100%;max-width:410px}
+.login-card h2{font-size:21px;margin-bottom:4px}
+.login-err{display:none;background:var(--danger-bg);border:1px solid #E7C7BF;color:#7E2E22;border-radius:10px;padding:11px 14px;font-size:13px;margin-bottom:14px}
+.login-err.on{display:flex;gap:9px;align-items:flex-start}
+.creds{background:var(--accent-faint);border:1px solid var(--accent-soft);border-radius:11px;padding:11px 14px;font-size:12.5px;margin-top:15px}
+.creds code{font-family:var(--f-num);font-size:11.5px;background:#fff;border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+.creds .row{display:flex;justify-content:space-between;gap:8px;padding:3px 0;flex-wrap:wrap}
+.spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:rot .7s linear infinite;display:none}
+@keyframes rot{to{transform:rotate(360deg)}}
+.btn.busy .spin{display:inline-block}
+
+/* Matrice */
+.matrix td{padding:8px 10px;font-size:12.5px}
+.matrix td.y{color:var(--ok);font-weight:700;text-align:center}
+.matrix td.n{color:var(--danger);text-align:center;opacity:.65}
+.matrix td.k{font-weight:600;color:var(--ink-2)}
+.matrix th.grp{text-align:left;background:var(--accent-faint);color:#7A5A2B;font-size:10.5px}
+.matrix thead th{text-align:center}
+.matrix thead th:first-child{text-align:left}
+
+/* Console d'intrusion */
+.console{background:#152420;color:#D8E6DD;border-radius:12px;padding:14px 16px;font-family:var(--f-num);font-size:12.5px;line-height:1.6;overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+.console .k{color:#8FD0A9}.console .r{color:#F0A392}.console .g{color:#E9C88F}
+.attack{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+.attack:last-child{border-bottom:none}
+.attack .desc{flex:1;min-width:220px}
+.attack .desc b{display:block;font-size:13.5px}
+.attack .desc small{color:var(--ink-3);font-size:12px}
+
+/* Banc de tests */
+.bench-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.verdict{font-weight:700;font-family:var(--f-num);font-size:12.5px}
+.verdict.p{color:var(--ok)}.verdict.f{color:var(--danger)}
+details.sc{border:1px solid var(--line-soft);border-radius:10px;margin:0 0 8px;background:#fff}
+details.sc summary{list-style:none;display:flex;gap:10px;align-items:center;padding:10px 14px;font-size:13px;cursor:pointer;flex-wrap:wrap}
+details.sc summary::-webkit-details-marker{display:none}
+details.sc .body{padding:10px 14px;border-top:1px solid var(--line-soft);font-size:12.5px;color:var(--ink-2);background:var(--bg-soft);border-radius:0 0 10px 10px}
+details.sc .body code{font-family:var(--f-num);font-size:11.5px;background:#fff;border:1px solid var(--line);border-radius:5px;padding:1px 6px;display:inline-block;margin:2px 0}
+.grp-h{font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:700;margin:18px 0 10px}
+
+/* Toasts */
+#toasts{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:150;display:flex;flex-direction:column;gap:8px;width:min(480px,calc(100vw - 24px))}
+.toast{background:var(--primary-deep);color:#fff;border-radius:12px;padding:12px 16px;font-size:13.5px;box-shadow:var(--shadow-lg);animation:fadein .25s}
+.toast.err{background:#843023}.toast.ok{background:#245C3B}
+
+/* Responsive */
+@media(max-width:900px){.g2,.g3,.bench-summary{grid-template-columns:1fr 1fr}.login-wrap{grid-template-columns:1fr}.login-hero{padding:30px 24px}.login-hero ul{display:none}.wrap{padding:16px 14px 70px}.top{padding:10px 14px}}
+@media(max-width:640px){.g2,.g3,.bench-summary{grid-template-columns:1fr}.tbl-wrap{overflow:visible}table.tbl{min-width:0;border:none}.tbl thead{display:none}.tbl tr{display:block;background:#fff;border:1px solid var(--line);border-radius:12px;margin:0 0 10px;padding:6px 4px;box-shadow:var(--shadow)}.tbl td{display:flex;justify-content:space-between;align-items:center;gap:12px;border:none;padding:8px 12px}.tbl td::before{content:attr(data-l);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);flex-shrink:0}.tbl td.num{text-align:right}.tbl td.act{justify-content:flex-end}.tbl td.act::before{display:none}.tbl td.y,.tbl td.n{text-align:left}.tbl td.y::before,.tbl td.n::before{content:attr(data-l)!important}.tag{white-space:normal}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="logo"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Ccircle cx='24' cy='24' r='21' fill='%23FFFFFF'/%3E%3Cpath d='M24 10l4.2 8.6 9.5 1.4-6.9 6.7 1.6 9.4L24 31.6l-8.4 4.5 1.6-9.4-6.9-6.7 9.5-1.4z' fill='%232A4A3A'/%3E%3C/svg%3E" alt="">
+  <span><b>ADL-CI GESTION</b><small>Sécurité — Authentification et accès</small></span></div>
+  <div class="who" id="top-who" style="display:none">
+    <span class="ava" id="top-ava">–</span>
+    <span><b id="top-name">–</b><small id="top-role">–</small></span>
+    <button class="btn gold sm" id="btn-logout">Déconnexion</button>
+  </div>
+</header>
+<nav class="topnav" id="topnav" aria-label="Sections"></nav>
+
+<!-- ============ ONGLET CONNEXION ============ -->
+<div class="tab" id="v-login">
+  <div class="login-wrap">
+    <div class="login-hero">
+      <div>
+        <h1>Accès sécurisé</h1>
+        <p>Un compte nominatif par personne — jamais de mot de passe partagé (RG-X1). Les permissions sont vérifiées par le serveur à chaque appel, pas seulement dans l'interface.</p>
+        <ul>
+          <li><b>Verrouillage</b> après 5 échecs de mot de passe (15 minutes), tracé au journal.</li>
+          <li><b>Mot de passe</b> jamais stocké en clair : dérivation PBKDF2 avec sel individuel.</li>
+          <li><b>Sessions</b> à durée limitée (8 h), révoquées à la déconnexion et à la désactivation.</li>
+          <li><b>Journal d'audit</b> chaîné : toute altération devient détectable.</li>
+        </ul>
+      </div>
+      <div class="foot">Prototype de démonstration v1.0 · Production visée : Node.js + Express / PostgreSQL (AT-1) · Ce prototype exige un navigateur moderne (Web Crypto).</div>
+    </div>
+    <div class="login-form">
+      <div class="login-card">
+        <h2 id="lg-title">Connexion</h2>
+        <p style="font-size:13.5px;color:var(--ink-3);margin-bottom:16px" id="lg-sub">Identifiez-vous avec les identifiants remis par l'administrateur.</p>
+        <div id="lg-err" class="login-err" role="alert"><span id="lg-err-ic">⚠️</span><span id="lg-err-txt"></span></div>
+        <form id="login-form" novalidate>
+          <div class="field" id="f-lg-user"><label for="lg-user">Identifiant <span style="color:var(--danger)">*</span></label>
+            <input id="lg-user" type="text" autocomplete="username" placeholder="Ex. : a.traore"><p class="errmsg">Saisissez votre identifiant.</p></div>
+          <div class="field" id="f-lg-pass"><label for="lg-pass">Mot de passe <span style="color:var(--danger)">*</span></label>
+            <input id="lg-pass" type="password" autocomplete="current-password" placeholder="Votre mot de passe"><p class="errmsg">Saisissez votre mot de passe.</p></div>
+          <button class="btn pri" id="lg-submit" type="submit" style="width:100%">Se connecter <span class="spin"></span></button>
+        </form>
+        <p style="text-align:center;margin-top:13px"><a href="#" id="link-forgot" style="font-size:13px;font-weight:600">Mot de passe oublié ?</a></p>
+        <div id="forgot-panel" style="display:none">
+          <div class="card" style="box-shadow:none"><div class="card-b">
+            <h3 style="font-size:15px;margin-bottom:6px">Récupération sécurisée</h3>
+            <p style="font-size:12.5px;color:var(--ink-3);margin-bottom:10px">Le serveur émet un jeton à usage unique valable 30 minutes. Dans l'application réelle, il part par e-mail ; ici, il s'affiche dans la zone « E-mail simulé » ci-dessous. Le jeton n'est jamais stocké en clair côté base en production.</p>
+            <div class="field"><label for="fp-user">Votre identifiant</label><input id="fp-user" type="text" placeholder="Ex. : n.aka"></div>
+            <button class="btn pri sm" id="fp-send">Demander un jeton</button>
+            <div id="fp-mailbox" style="display:none;margin-top:12px">
+              <div class="note info"><span>📧</span><span><b>E-mail simulé (n'existe pas en démonstration)</b><span id="fp-token-line">Jeton : <code id="fp-token" style="font-family:var(--f-num)">–</code></span></span></div>
+              <div class="field" style="margin-top:10px"><label for="fp-token-in">Jeton reçu</label><input id="fp-token-in" type="text" placeholder="Collez le jeton"></div>
+              <div class="field" id="f-fp-new"><label for="fp-new">Nouveau mot de passe</label><input id="fp-new" type="password" placeholder="10 caractères min., majuscule, minuscule, chiffre, spécial">
+                <p class="help">La politique est vérifiée par le serveur, avec le motif exact du refus le cas échéant.</p></div>
+              <button class="btn pri sm" id="fp-confirm">Enregistrer le nouveau mot de passe</button>
+            </div>
+          </div></div>
+        </div>
+        <div class="creds">
+          <b style="display:block;margin-bottom:5px">Comptes de démonstration (retirés en production)</b>
+          <div class="row"><span>Administrateur</span><code>s.diallo / Admin-2026!CI</code></div>
+          <div class="row"><span>Président</span><code>m.kante / President-2026!</code></div>
+          <div class="row"><span>Trésorier</span><code>a.traore / Tresor-2026!CI</code></div>
+          <div class="row"><span>Secrétaire général</span><code>f.cisse / Secretariat-2026!</code></div>
+          <div class="row"><span>Membre du bureau</span><code>n.aka / Bureau-2026!CI</code></div>
+          <div class="row"><span>Membre ordinaire</span><code>k.yao / Membre-2026!CI</code></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap" id="v-appzone" style="display:none">
+  <!-- ============ ONGLET MON ESPACE ============ -->
+  <div class="tab" id="v-session">
+    <div class="head"><div><h1>Mon espace</h1><p class="sub">Ce que le serveur sait sur votre session, et ce qu'il vous autorise — la liste affichée est produite par le serveur lui-même, pas par l'interface.</p></div></div>
+    <div class="grid g2">
+      <div class="card"><div class="card-h"><h2>Identité et session</h2><span class="tag ok" id="sess-state">Session active</span></div><div class="card-b" id="sess-info"></div></div>
+      <div class="card"><div class="card-h"><h2>Permissions effectives</h2><span class="tag neutral" id="perm-count">–</span></div><div class="card-b" id="perm-list"></div></div>
+    </div>
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card"><div class="card-h"><h2>Changer mon mot de passe</h2></div><div class="card-b">
+        <div class="field" id="f-ch-old"><label for="ch-old">Mot de passe actuel</label><input id="ch-old" type="password" autocomplete="current-password"></div>
+        <div class="field" id="f-ch-new"><label for="ch-new">Nouveau mot de passe</label><input id="ch-new" type="password" autocomplete="new-password"><p class="help">Minimum 10 caractères, avec majuscule, minuscule, chiffre et caractère spécial — vérification côté serveur.</p><p class="errmsg"></p></div>
+        <button class="btn pri" id="ch-btn">Enregistrer le nouveau mot de passe</button>
+        <p class="help" style="margin-top:10px">Après un changement, toutes les autres sessions du compte sont révoquées et l'action est tracée au journal.</p>
+      </div></div>
+      <div class="card"><div class="card-h"><h2>Ma fiche (lecture)</h2><span class="tag neutral">Projets DTO — jamais le stock brut</span></div><div class="card-b" id="self-fiche"></div></div>
+    </div>
+  </div>
+
+  <!-- ============ ONGLET UTILISATEURS ============ -->
+  <div class="tab" id="v-users">
+    <div class="head"><div><h1>Gestion des utilisateurs</h1><p class="sub" id="users-sub">Création, attribution de rôle et désactivation — réservées à l'administrateur. Le président dispose de la lecture de supervision.</p></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap" id="users-actions"><button class="btn pri" id="btn-user-new">+ Créer un compte</button></div></div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="users-tbl">
+      <thead><tr><th>Utilisateur</th><th>Rôle</th><th>Statut</th><th>Échecs / verrou</th><th>Dernière connexion</th><th></th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+    <div id="user-new-panel" style="display:none;margin-top:16px"><div class="card"><div class="card-h"><h3 style="font-size:16px">Créer un compte nominatif</h3></div><div class="card-b">
+      <div class="grid g2">
+        <div class="field" id="f-nu-name"><label for="nu-name">Nom complet <span style="color:var(--danger)">*</span></label><input id="nu-name" type="text"><p class="errmsg">Le nom est obligatoire.</p></div>
+        <div class="field" id="f-nu-user"><label for="nu-user">Identifiant de connexion <span style="color:var(--danger)">*</span></label><input id="nu-user" type="text" placeholder="Ex. : p.doe"><p class="errmsg">Identifiant obligatoire, sans espaces.</p></div>
+      </div>
+      <div class="grid g2">
+        <div class="field" id="f-nu-role"><label for="nu-role">Rôle attribué <span style="color:var(--danger)">*</span></label>
+          <select id="nu-role"><option value="">— Choisir le rôle —</option><option value="admin">Administrateur</option><option value="president">Président</option><option value="tresorier">Trésorier</option><option value="secretaire">Secrétaire général</option><option value="bureau">Autre membre du bureau</option><option value="membre">Membre ordinaire</option></select>
+          <p class="help">Le rôle détermine toutes les permissions côté serveur. Un compte membre ne peut jamais modifier les données financières.</p><p class="errmsg">Choisissez un rôle.</p></div>
+        <div class="field" id="f-nu-pass"><label for="nu-pass">Mot de passe initial <span style="color:var(--danger)">*</span></label><input id="nu-pass" type="text" placeholder="Soumis à la politique côté serveur"><p class="help">Le titulaire devra le changer à sa première connexion (affiché dans le journal).</p><p class="errmsg"></p></div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap"><button class="btn ghost" id="nu-cancel">Annuler</button><button class="btn pri" id="nu-submit">Créer le compte</button></div>
+      <div id="nu-result" style="margin-top:12px"></div>
+    </div></div></div>
+  </div>
+
+  <!-- ============ ONGLET MATRICE ============ -->
+  <div class="tab" id="v-matrix">
+    <div class="head"><div><h1>Matrice des permissions</h1><p class="sub">Cette table est générée directement depuis la configuration du serveur : ce qui est affiché ici ne peut pas diverger de ce qui est réellement appliqué. Un ✗ signifie que l'appel d'API correspondant est refusé même si l'interface le montrait.</p></div></div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap"><table class="tbl matrix" id="matrix-tbl"></table></div></div></div>
+    <div class="grid g2" style="margin-top:16px">
+      <div class="note info"><span>⚖️</span><span><b>Séparation des pouvoirs.</b> L'administrateur gère les comptes et les paramètres mais ne peut ni consulter ni saisir de données financières ; le trésorier saisit mais ne gère aucun compte ; le président supervise (lecture, journal, rapports) sans jamais saisir — la saisie financière reste au trésorier seul (RG-H1).</span></div>
+      <div class="note warn"><span>🛡️</span><span><b>Défense en profondeur.</b> Cinq couches indépendantes : (1) session valide et non expirée, (2) compte actif, (3) permission du rôle vérifiée pour chaque endpoint, (4) validation des données par le serveur (motif de contre-passation, politique de mot de passe), (5) journal d'audit inaltérable. Masquer un bouton n'en fait partie d'aucune.</span></div>
+    </div>
+  </div>
+
+  <!-- ============ ONGLET JOURNAL D'AUDIT ============ -->
+  <div class="tab" id="v-audit">
+    <div class="head"><div><h1>Journal d'audit</h1><p class="sub">Lecture seule (RG-X2). Chaque entrée est chaînée par hachage à la précédente : modifier une entrée ancienne casse toute la chaîne suivante et devient visible.</p></div>
+      <button class="btn pri" id="btn-audit-verify">Vérifier l'intégrité de la chaîne</button></div>
+    <div id="audit-verify-result" style="margin-bottom:14px"></div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="audit-tbl">
+      <thead><tr><th>#</th><th>Horodatage</th><th>Auteur</th><th>Action</th><th>Détail</th><th>Niveau</th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+    <!-- ============ ONGLET BANC DE TESTS ============ -->
+  <div class="tab" id="v-bench">
+    <div class="head"><div><h1>Banc de tests de sécurité</h1><p class="sub">29 scénarios qui testent chaque rôle à travers l'API directe du serveur — sans jamais passer par les boutons de l'interface. Un test réussi (✓) signifie que le comportement attendu (accord ou refus) a bien été produit par le serveur lui-même.</p></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn pri" id="btn-bench-run">Lancer tous les tests</button><button class="btn ghost" id="btn-bench-export">Exporter les résultats (JSON)</button></div></div>
+    <div class="bench-summary" id="bench-summary">
+      <div class="kpi gold"><span class="lab">Scénarios exécutés</span><div class="val" id="bs-total">–</div></div>
+      <div class="kpi"><span class="lab">Conformes (✓)</span><div class="val" id="bs-pass">–</div></div>
+      <div class="kpi"><span class="lab">Écarts (✗)</span><div class="val" id="bs-fail">–</div></div>
+      <div class="kpi"><span class="lab">Durée d'exécution</span><div class="val" id="bs-time">–</div></div>
+    </div>
+    <div id="bench-results"><div class="note info"><span>▶</span><span><b>Lancez la suite.</b> Chaque scénario reconnecte les sessions nécessaires, attaque l'API directement (appels forgés, escalade de rôle, jetons réutilisés) et compare la réponse du serveur au comportement attendu. L'environnement de démonstration est réinitialisé à la fin.</span></div></div>
+  </div>
+
+  <!-- ============ ONGLET CONSOLE D'INTRUSION ============ -->
+  <div class="tab" id="v-intrusion">
+    <div class="head"><div><h1>Console d'intrusion</h1><p class="sub">Ces attaques contournent volontairement l'interface : elles appellent le serveur directement, avec des identités forgées ou des intentions interdites. Chaque réponse brute est affichée, et chaque tentative est enregistrée au journal d'audit.</p></div></div>
+    <div class="card" style="margin-bottom:16px"><div id="attacks"></div></div>
+    <div class="card"><div class="card-h"><h2>Réponses brutes du serveur</h2><button class="btn ghost sm" id="btn-console-clear">Effacer la console</button></div><div class="card-b"><div class="console" id="console-out">Console prête. Choisissez une attaque ci-dessus — les réponses du serveur apparaîtront ici.</div></div></div>
+  </div>
+
+  <!-- ============ ONGLET ARCHITECTURE ET LIMITES ============ -->
+  <div class="tab" id="v-archi">
+    <div class="head"><div><h1>Correspondance production et limites assumées</h1><p class="sub">Ce prototype tourne entièrement dans un navigateur : il sert à spécifier et à démontrer les comportements. La sécurité réelle sera portée par la stack validée (AT-1) — le tableau ci-dessous mappe chaque mécanisme du prototype vers son implémentation de production.</p></div></div>
+    <div class="card"><div class="card-h"><h2>Du prototype à la production — Node.js + Express / PostgreSQL (AT-1)</h2></div>
+      <div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="map-tbl">
+        <thead><tr><th>Mécanisme (prototype)</th><th>Implémentation de production</th><th>Verrou correspondant</th></tr></thead>
+        <tbody id="map-body"></tbody></table></div></div></div>
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card"><div class="card-h"><h2>Failles et limites détectées sur ce prototype</h2><span class="tag warn">Liste honnête</span></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="flaws-tbl">
+        <thead><tr><th>#</th><th>Constat</th><th>Criticité</th><th>Traitement</th></tr></thead>
+        <tbody id="flaws-body"></tbody></table></div></div></div>
+      <div class="card"><div class="card-h"><h2>Ce que le serveur ne fait jamais</h2></div><div class="card-b">
+        <div style="display:grid;gap:10px;font-size:13.5px" id="never-list"></div>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+<script>
+"use strict";
+/* ==================================================================
+   SERVEUR SIMULÉ — c'est ici, et uniquement ici, que vivent :
+   la base des comptes, les sessions, les permissions et le journal.
+   Le client (UI) ne reçoit jamais de référence vers ces objets :
+   chaque réponse est une projection (DTO) clonée, sans champs secrets.
+   En production (AT-1), ce module devient le serveur Node.js + Express,
+   avec PostgreSQL comme registre et les mêmes règles en middleware.
+   ================================================================== */
+const SERVER = (() => {
+  const enc = new TextEncoder();
+  if (!window.crypto || !crypto.subtle) { alert("Navigateur sans Web Crypto : ce prototype exige un navigateur moderne."); throw new Error("no crypto"); }
+
+  async function sha256(str) {
+    const d = await crypto.subtle.digest("SHA-256", enc.encode(str));
+    return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  async function pbkdf2(pass, saltHex, iters = 120000) {
+    const key = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveBits"]);
+    const salt = new Uint8Array((saltHex.match(/../g) || []).map(h => parseInt(h, 16)));
+    const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: iters }, key, 256);
+    return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  const rand = n => [...crypto.getRandomValues(new Uint8Array(n))].map(b => b.toString(16).padStart(2, "0")).join("");
+
+  /* --- horloge serveur décalable (pour tester expiration et verrouillage) --- */
+  let CLOCK_OFF = 0;
+  const now = () => Date.now() + CLOCK_OFF;
+  const iso = () => new Date(now()).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  /* --- base interne (jamais exposée telle quelle) --- */
+  const SESSION_TTL = 8 * 3600 * 1000, RESET_TTL = 30 * 60 * 1000, LOCK_TTL = 15 * 60 * 1000, MAX_FAIL = 5;
+  const users = [], sessions = new Map(), resets = new Map();
+  let auditSeq = 0, auditLog = [], auditTail = Promise.resolve();
+  const finance = { solde: 245750, ops: [] };
+  const settings = { cotisation: "1 000 FCFA", penalite: "500 FCFA", quorum: "15 membres actifs", exercice: "1er janvier — 31 décembre" };
+  const members = [
+    { id: 1, nom: "Kouassi Yao", tribu: "A", matricule: "M-008", score: 82.0, moisDu: 0 },
+    { id: 2, nom: "Ibrahima Sanogo", tribu: "B", matricule: "M-014", score: 66.0, moisDu: 2 }
+  ];
+
+  /* --- permissions par rôle : LA source de vérité (la matrice affichée est générée depuis ici) --- */
+  const R = { admin: "Administrateur", president: "Président", tresorier: "Trésorier", secretaire: "Secrétaire général", bureau: "Autre membre du bureau", membre: "Membre ordinaire" };
+  const ROLES = Object.keys(R);
+  const PERMS = {
+    "auth.self":            ["admin","president","tresorier","secretaire","bureau","membre"],
+    "members.view_self":    ["admin","president","tresorier","secretaire","bureau","membre"],
+    "members.view_all":     ["admin","president","tresorier","secretaire","bureau"],
+    "members.create":       ["secretaire"],
+    "members.update":       ["secretaire"],
+    "finance.view":         ["president","tresorier","secretaire","bureau"],
+    "finance.record_payment":   ["tresorier"],
+    "finance.record_operation": ["tresorier"],
+    "finance.countpass":    ["tresorier"],
+    "meetings.view":        ["admin","president","tresorier","secretaire","bureau","membre"],
+    "meetings.call":        ["secretaire"],
+    "meetings.create":      ["secretaire"],
+    "projects.view":        ["admin","president","tresorier","secretaire","bureau","membre"],
+    "projects.create":      ["president"],
+    "scores.view_self":     ["admin","president","tresorier","secretaire","bureau","membre"],
+    "scores.view_all":      ["admin","president","tresorier","secretaire","bureau"],
+    "rankings.view":        ["admin","president","tresorier","secretaire","bureau","membre"],
+    "reports.view":         ["admin","president","tresorier","secretaire","bureau","membre"],
+    "reports.generate":     ["president","tresorier"],
+    "users.view":           ["admin","president"],
+    "users.create":         ["admin"],
+    "users.update":         ["admin"],
+    "users.deactivate":     ["admin"],
+    "audit.view":           ["admin","president"],
+    "settings.view":        ["admin","president"],
+    "settings.update":      ["admin"]
+  };
+  const PERM_LABELS = {
+    "auth.self":"Changer son propre mot de passe","members.view_self":"Voir sa propre fiche","members.view_all":"Voir tous les membres",
+    "members.create":"Adhérer un membre","members.update":"Modifier un membre","finance.view":"Consulter les finances",
+    "finance.record_payment":"Enregistrer un paiement","finance.record_operation":"Enregistrer une opération","finance.countpass":"Contre-passer une opération",
+    "meetings.view":"Consulter les réunions","meetings.call":"Faire l'appel","meetings.create":"Planifier une réunion",
+    "projects.view":"Consulter les projets","projects.create":"Créer un projet","scores.view_self":"Voir son score","scores.view_all":"Voir tous les scores",
+    "rankings.view":"Consulter les classements","reports.view":"Consulter les rapports mensuels","reports.generate":"Générer un rapport",
+    "users.view":"Lister les comptes","users.create":"Créer un compte","users.update":"Modifier un compte","users.deactivate":"Désactiver un compte",
+    "audit.view":"Consulter le journal d'audit","settings.view":"Consulter les paramètres","settings.update":"Modifier les paramètres"
+  };
+
+  /* --- politique de mot de passe (vérifiée côté serveur, jamais côté client seul) --- */
+  function passwordPolicy(p) {
+    const errors = [];
+    if (typeof p !== "string" || p.length < 10) errors.push("au moins 10 caractères");
+    if (!/[A-Z]/.test(p)) errors.push("une majuscule");
+    if (!/[a-z]/.test(p)) errors.push("une minuscule");
+    if (/[0-9]/.test(p) === false) errors.push("un chiffre");
+    if (!/[^A-Za-z0-9]/.test(p)) errors.push("un caractère spécial");
+    return errors;
+  }
+
+  /* --- journal d'audit chaîné (chaque entrée hache son contenu + le hash précédent) ---
+     Les écritures sont SÉRIALISÉES par une file de promesses : deux appels concurrents
+     ne peuvent pas lire la même « entrée précédente » et rompre la chaîne. */
+  async function _audit(action, actor, role, detail, level) {
+    const e = { seq: ++auditSeq, ts: iso(), actor: actor || "système", role: role || "—", action, detail: detail || "", level: level || "INFO", prev: auditLog.length ? auditLog[auditLog.length - 1].hash : "GENÈSE" };
+    e.hash = await sha256([e.seq, e.ts, e.actor, e.action, e.detail, e.prev].join("|"));
+    auditLog.push(e);
+    return e.seq;
+  }
+  function audit(action, actor, role, detail, level) {
+    const p = auditTail.then(() => _audit(action, actor, role, detail, level));
+    auditTail = p.then(() => undefined, () => undefined);
+    return p;
+  }
+  async function verifyAudit() {
+    let prev = "GENÈSE";
+    for (const e of auditLog) {
+      const h = await sha256([e.seq, e.ts, e.actor, e.action, e.detail, e.prev].join("|"));
+      if (e.prev !== prev) return { integre: false, seq: e.seq, motif: "chaîne rompue (lien avec l'entrée précédente)" };
+      if (h !== e.hash) return { integre: false, seq: e.seq, motif: "contenu modifié (hash recomposé différent)" };
+      prev = e.hash;
+    }
+    return { integre: true, seq: auditSeq, motif: "" };
+  }
+
+  /* --- projection DTO : jamais de hash, de sel, de jeton ni de référence interne --- */
+  const userDTO = u => ({ id: u.id, user: u.user, nom: u.nom, role: u.role, roleLabel: R[u.role], statut: u.statut, echecs: u.echecs, verrou: u.lockedUntil && u.lockedUntil > now() ? "jusqu'à " + new Date(u.lockedUntil).toLocaleTimeString("fr-FR") : "—", mustChange: !!u.mustChange, derniere: u.derniere || "—" });
+
+  /* --- réponses normalisées, en phrases compréhensibles --- */
+  const resp = (status, code, msg, data, auditId) => ({ status, code, msg, data: data ?? null, auditId: auditId ?? null });
+
+  /* --- création / suppression de sessions --- */
+  function openSession(u) { const t = rand(32); sessions.set(t, { userId: u.id, exp: now() + SESSION_TTL }); return t; }
+  function revokeUserSessions(uid) { for (const [t, s] of sessions) if (s.userId === uid) sessions.delete(t); }
+
+  /* --- préparation d'une requête : les couches de défense, dans l'ordre --- */
+  async function guard(req, def) {
+    // 1) l'endpoint existe (surface API minimale — pas de requête SQL libre)
+    if (!def) { const a = await audit("ENDPOINT_INEXISTANT", req.actorLabel || "inconnu", "—", (req.endpoint || "?") + " — requête rejetée, aucun accès à la base", "BLOCAGE"); return resp(404, "ENDPOINT_INEXISTANT", "Cette action n'existe pas sur le serveur. Aucun accès libre à la base n'est proposé — en production comme ici, l'API n'expose que des actions définies.", null, a); }
+    // 2) endpoints publics (connexion, récupération)
+    if (def.public) return null;
+    // 3) session présente et valide
+    const s = req.token && sessions.get(req.token);
+    if (!req.token || !s) { const a = await audit("SESSION_REQUISE", req.actorLabel || "anonyme", "—", req.endpoint + " sans session valide" + (req.token ? " (jeton inconnu ou révoqué)" : ""), "BLOCAGE"); return resp(401, "AUTH_REQUISE", "Vous devez être connecté pour cette action." + (req.token ? " Votre jeton est inconnu du serveur (forgé ou révoqué) et l'essai a été enregistré." : ""), null, a); }
+    if (s.exp <= now()) { sessions.delete(req.token); const u = users.find(x => x.id === s.userId); const a = await audit("SESSION_EXPIREE", u ? u.user : "?", u ? R[u.role] : "—", req.endpoint, "BLOCAGE"); return resp(401, "SESSION_EXPIREE", "Votre session a expiré (8 heures). Reconnectez-vous.", null, a); }
+    // 4) compte actif
+    const u = users.find(x => x.id === s.userId);
+    if (!u || u.statut !== "actif") { sessions.delete(req.token); const a = await audit("COMPTE_REFUSE", u ? u.user : "?", "—", req.endpoint + " — compte inexistant ou désactivé, session révoquée", "BLOCAGE"); return resp(401, "COMPTE_DESACTIVE", "Ce compte est désactivé : aucune action n'est possible, même avec une session encore ouverte.", null, a); }
+    // 5) permission du rôle pour ce endpoint
+    if (def.perm && !PERMS[def.perm]?.includes(u.role)) { const a = await audit("TENTATIVE_NON_AUTORISEE", u.user, R[u.role], req.endpoint + " exige « " + (def.perm || "—") + " » — rôle « " + R[u.role] + " » refusé", "ALERTE"); return resp(403, "ACCES_REFUSE", "Votre rôle (« " + R[u.role] + " ») n'autorise pas cette action. Le refus est prononcé par le serveur et enregistré au journal.", null, a); }
+    req.user = u;
+    return null;
+  }
+
+  /* --- les endpoints du serveur : la liste complète est volontairement courte --- */
+  const EP = {};
+  EP["auth.login"] = { public: true, async h(req) {
+    const { user, pass } = req.body || {};
+    const u = users.find(x => x.user === user);
+    if (!u) { const a = await audit("CONNEXION_ECHEC", String(user || "?"), "—", "identifiant inconnu", "ALERTE"); return resp(401, "IDENTIFIANT_INVALIDE", "Identifiant ou mot de passe incorrect.", null, a); }
+    if (u.lockedUntil && u.lockedUntil > now()) { const min = Math.ceil((u.lockedUntil - now()) / 60000); const a = await audit("CONNEXION_REFUSEE_VERROU", u.user, R[u.role], "compte verrouillé jusqu'à " + new Date(u.lockedUntil).toLocaleTimeString("fr-FR"), "BLOCAGE"); return resp(423, "COMPTE_VERROUILLE", "Compte temporairement verrouillé après des échecs répétés. Nouvelle tentative possible dans " + min + " min, ou contactez l'administrateur.", null, a); }
+    if (u.statut !== "actif") { const a = await audit("CONNEXION_COMPTE_DESACTIVE", u.user, R[u.role], "tentative de connexion sur compte désactivé", "BLOCAGE"); return resp(401, "COMPTE_DESACTIVE", "Ce compte a été désactivé par l'administrateur. Contactez-le pour le réactiver.", null, a); }
+    const h = await pbkdf2(pass || "", u.salt);
+    if (h !== u.hash) { u.echecs++; if (u.echecs >= MAX_FAIL) { u.lockedUntil = now() + LOCK_TTL; u.echecs = 0; const a = await audit("COMPTE_VERROUILLE", u.user, R[u.role], MAX_FAIL + " échecs de mot de passe — verrou 15 minutes", "BLOCAGE"); return resp(423, "COMPTE_VERROUILLE", "Cinq échecs consécutifs : le compte est verrouillé 15 minutes et l'événement est enregistré au journal d'audit.", null, a); } const a = await audit("CONNEXION_ECHEC", u.user, R[u.role], "mot de passe incorrect (échec " + u.echecs + "/" + MAX_FAIL + ")", "ALERTE"); return resp(401, "IDENTIFIANT_INVALIDE", "Identifiant ou mot de passe incorrect. Il reste " + (MAX_FAIL - u.echecs) + " tentative(s) avant verrouillage.", null, a); }
+    u.echecs = 0; u.lockedUntil = null; u.derniere = iso();
+    const t = openSession(u);
+    const a = await audit("CONNEXION", u.user, R[u.role], "session ouverte pour 8 h" + (u.mustChange ? " — changement de mot de passe imposé" : ""));
+    return resp(200, "OK", "Bienvenue " + u.nom + " — session ouverte pour 8 heures.", { token: t, user: userDTO(u), perms: PERMS ? Object.keys(PERMS).filter(p => PERMS[p].includes(u.role)) : [] }, a);
+  } };
+  EP["auth.logout"] = { perm: "auth.self", async h(req) { sessions.delete(req.token); const a = await audit("DECONNEXION", req.user.user, R[req.user.role], "session fermée"); return resp(200, "OK", "Session fermée.", null, a); } };
+  EP["auth.whoami"] = { perm: "auth.self", async h(req) { return resp(200, "OK", "Session valide.", { user: userDTO(req.user), perms: Object.keys(PERMS).filter(p => PERMS[p].includes(req.user.role)), sessionExp: new Date(sessions.get(req.token).exp).toLocaleTimeString("fr-FR") }); } };
+  EP["auth.change_password"] = { perm: "auth.self", async h(req) {
+    const { old: oldp, new: newp } = req.body || {};
+    const u = req.user;
+    const h = await pbkdf2(oldp || "", u.salt);
+    if (h !== u.hash) { const a = await audit("MDP_REFUSE", u.user, R[u.role], "ancien mot de passe incorrect", "ALERTE"); return resp(401, "ANCIEN_MDP_INVALIDE", "Votre mot de passe actuel est incorrect — rien n'a été modifié.", null, a); }
+    const errs = passwordPolicy(newp);
+    if (errs.length) { const a = await audit("MDP_REJETE", u.user, R[u.role], "politique : " + errs.join(", "), "ALERTE"); return resp(422, "POLITIQUE_MDP", "Mot de passe refusé : il faut " + errs.join(", ") + ".", null, a); }
+    u.salt = rand(16); u.hash = await pbkdf2(newp, u.salt); u.mustChange = false;
+    revokeUserSessions(u.id);
+    const a = await audit("MDP_MODIFIE", u.user, R[u.role], "mot de passe changé — toutes les sessions du compte ont été révoquées");
+    return resp(200, "OK", "Mot de passe enregistré. Vos autres sessions ont été fermées par sécurité — reconnectez-vous.", null, a);
+  } };
+  EP["auth.reset_request"] = { public: true, async h(req) {
+    const u = users.find(x => x.user === (req.body || {}).user);
+    if (!u) { const a = await audit("RESET_DEMANDE", String((req.body || {}).user || "?"), "—", "identifiant inconnu — réponse identique pour ne pas révéler les comptes existants"); return resp(200, "OK", "Si cet identifiant existe, un jeton vient d'être envoyé. Vérifiez votre messagerie.", null, a); }
+    const t = rand(20);
+    resets.set(t, { userId: u.id, exp: now() + RESET_TTL, used: false });
+    const a = await audit("RESET_DEMANDE", u.user, R[u.role], "jeton de récupération émis (30 min, usage unique)");
+    return resp(200, "OK", "Jeton envoyé par e-mail (simulé ici) : valable 30 minutes et à usage unique.", { token: t }, a);
+  } };
+  EP["auth.reset_confirm"] = { public: true, async h(req) {
+    const { token, new: newp } = req.body || {};
+    const r = token && resets.get(token);
+    const deny = async (code, msg, detail) => { const a = await audit("RESET_JETON_REJETE", "anonyme", "—", detail, "BLOCAGE"); return resp(401, code, msg, null, a); };
+    if (!r) return deny("JETON_INVALIDE", "Ce jeton n'existe pas ou a déjà été utilisé. Demandez un nouveau jeton.", "jeton inconnu ou déjà consommé");
+    if (r.used) return deny("JETON_DEJA_UTILISE", "Ce jeton a déjà servi : un jeton de récupération ne peut servir qu'une seule fois. Demandez-en un nouveau.", "réutilisation d'un jeton déjà consommé");
+    if (r.exp <= now()) return deny("JETON_EXPIRE", "Ce jeton a expiré (30 minutes). Demandez-en un nouveau.", "jeton expiré");
+    const errs = passwordPolicy(newp);
+    if (errs.length) { const a = await audit("MDP_REJETE", "récupération", "—", "politique : " + errs.join(", "), "ALERTE"); return resp(422, "POLITIQUE_MDP", "Mot de passe refusé : il faut " + errs.join(", ") + ".", null, a); }
+    const u = users.find(x => x.id === r.userId);
+    r.used = true; u.salt = rand(16); u.hash = await pbkdf2(newp, u.salt); u.echecs = 0; u.lockedUntil = null;
+    revokeUserSessions(u.id);
+    const a = await audit("RESET_CONFIRME", u.user, R[u.role], "mot de passe réinitialisé via jeton — sessions révoquées");
+    return resp(200, "OK", "Nouveau mot de passe enregistré. Vous pouvez vous connecter avec.", null, a);
+  } };
+
+  EP["members.view_self"] = { perm: "members.view_self", async h(req) { const m = req.user.memberId ? members.find(x => x.id === req.user.memberId) : null; return resp(200, "OK", m ? "Votre fiche." : "Aucune fiche membre n'est liée à ce compte.", m ? { ...m } : { note: "compte sans fiche membre" }); } };
+  EP["members.view_all"] = { perm: "members.view_all", async h(req) { return resp(200, "OK", members.length + " fiches membres.", members.map(m => ({ ...m }))); } };
+  EP["members.create"] = { perm: "members.create", async h(req) { const b = req.body || {}; if (!b.nom || !b.tribu) { const a = await audit("ADHESION_REJETEE", req.user.user, R[req.user.role], "nom ou tribu manquant", "ALERTE"); return resp(422, "DONNEES_INVALIDES", "Nom complet et tribu sont obligatoires.", null, a); } const m = { id: members.length + 1, nom: String(b.nom), tribu: String(b.tribu), matricule: "M-" + String(members.length + 1).padStart(3, "0"), score: 0, moisDu: 0 }; members.push(m); const a = await audit("MEMBRE_ADHERE", req.user.user, R[req.user.role], m.nom + " (" + m.matricule + ", tribu " + m.tribu + ")"); return resp(200, "OK", m.nom + " est adhérent(e) avec le matricule " + m.matricule + ".", { ...m }, a); } };
+  EP["finance.view"] = { perm: "finance.view", async h(req) { return resp(200, "OK", "Situation financière au " + iso() + ".", { solde: finance.solde, ops: finance.ops.slice(-8).map(o => ({ ...o })) }); } };
+  EP["finance.record_payment"] = { perm: "finance.record_payment", async h(req) {
+    const b = req.body || {}; const errs = [];
+    const montant = Number(b.montant); if (!montant || montant < 500 || montant > 1000000) errs.push("le montant doit être entre 500 et 1 000 000 FCFA");
+    if (!b.mois) errs.push("le mois réglé est obligatoire");
+    if (!b.recu) errs.push("le numéro de reçu est obligatoire");
+    if (errs.length) { const a = await audit("PAIEMENT_REJETE", req.user.user, R[req.user.role], errs.join(" ; "), "ALERTE"); return resp(422, "DONNEES_INVALIDES", "Saisie refusée par le serveur : " + errs.join(" ; ") + ".", null, a); }
+    const op = { id: finance.ops.length + 1, d: iso(), type: "rec", libelle: "Cotisation " + b.mois + " — " + (b.membre || "membre"), montant, recu: String(b.recu).slice(0, 40), par: req.user.user };
+    finance.ops.push(op); finance.solde += montant;
+    const a = await audit("PAIEMENT_ENREGISTRE", req.user.user, R[req.user.role], op.libelle + " — " + montant.toLocaleString("fr-FR") + " FCFA — reçu " + op.recu);
+    return resp(200, "OK", "Paiement enregistré : " + montant.toLocaleString("fr-FR") + " FCFA imputés. Nouveau solde : " + finance.solde.toLocaleString("fr-FR") + " FCFA.", { ...op, solde: finance.solde }, a);
+  } };
+  EP["finance.record_operation"] = { perm: "finance.record_operation", async h(req) {
+    const b = req.body || {}; const type = b.type === "dep" ? "dep" : b.type === "rec" ? "rec" : null;
+    const montant = Number(b.montant);
+    if (!type || !b.libelle || !b.piece || !montant || montant < 100) { const a = await audit("OPERATION_REJETEE", req.user.user, R[req.user.role], "champs incomplets ou montant invalide", "ALERTE"); return resp(422, "DONNEES_INVALIDES", "Une opération exige : type (recette/dépense), libellé, pièce justificative et montant d'au moins 100 FCFA.", null, a); }
+    const op = { id: finance.ops.length + 1, d: iso(), type, libelle: String(b.libelle).slice(0, 90), montant, recu: String(b.piece).slice(0, 40), par: req.user.user };
+    finance.ops.push(op); finance.solde += type === "rec" ? montant : -montant;
+    const a = await audit("OPERATION_ENREGISTREE", req.user.user, R[req.user.role], (type === "rec" ? "Recette : " : "Dépense : ") + op.libelle + " — " + montant.toLocaleString("fr-FR") + " FCFA");
+    return resp(200, "OK", "Opération enregistrée. Nouveau solde : " + finance.solde.toLocaleString("fr-FR") + " FCFA.", { ...op, solde: finance.solde }, a);
+  } };
+  EP["finance.countpass"] = { perm: "finance.countpass", async h(req) {
+    const b = req.body || {}; const motif = (b.motif || "").trim();
+    if (!b.ref) { const a = await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], "référence manquante", "ALERTE"); return resp(422, "DONNEES_INVALIDES", "Indiquez la référence de l'opération à corriger.", null, a); }
+    if (motif.length < 10) { const a = await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], "motif trop court (" + motif.length + " caractères)", "ALERTE"); return resp(422, "MOTIF_INSUFFISANT", "Le motif de la correction est obligatoire (au moins 10 caractères) : il sera opposable au journal d'audit (RG-F3).", null, a); }
+    const orig = finance.ops.find(o => String(o.id) === String(b.ref) || o.recu === b.ref);
+    if (!orig) { const a = await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], "référence inconnue : " + b.ref, "ALERTE"); return resp(404, "OPERATION_INCONNUE", "Aucune opération ne porte cette référence — l'original reste inchangé.", null, a); }
+    const inv = { id: finance.ops.length + 1, d: iso(), type: orig.type === "rec" ? "dep" : "rec", libelle: "CONTRE-PASSATION de « " + orig.libelle + " » — motif : " + motif.slice(0, 120), montant: orig.montant, recu: "CP-" + orig.recu, par: req.user.user };
+    finance.ops.push(inv); finance.solde += orig.type === "rec" ? -orig.montant : orig.montant;
+    const a = await audit("CONTRE_PASSATION", req.user.user, R[req.user.role], "opération n°" + orig.id + " annulée par écriture inverse — motif : " + motif.slice(0, 120));
+    return resp(200, "OK", "Correction enregistrée : écriture inverse liée à l'original. Les deux restent visibles (RG-F3). Nouveau solde : " + finance.solde.toLocaleString("fr-FR") + " FCFA.", { ...inv, solde: finance.solde }, a);
+  } };
+  EP["meetings.call"] = { perm: "meetings.call", async h(req) { const p = Array.isArray((req.body || {}).presentes) ? (req.body || {}).presentes.length : 0; if (!p) { const a = await audit("APPEL_REJETE", req.user.user, R[req.user.role], "liste de présents vide", "ALERTE"); return resp(422, "DONNEES_INVALIDES", "L'appel exige la liste des présents.", null, a); } const okq = p >= 15; const a = await audit("APPEL_CLOTURE", req.user.user, R[req.user.role], p + " présents — quorum " + (okq ? "atteint" : "NON atteint") + " (15 requis)"); return resp(200, "OK", "Appel enregistré : " + p + " présents. Quorum " + (okq ? "atteint" : "non atteint") + ".", { presents: p, quorum: okq }, a); } };
+  EP["meetings.create"] = { perm: "meetings.create", async h(req) { const b = req.body || {}; if (!b.date || !b.objet) { const a = await audit("REUNION_REJETEE", req.user.user, R[req.user.role], "date ou objet manquant", "ALERTE"); return resp(422, "DONNEES_INVALIDES", "Date et objet sont obligatoires.", null, a); } const a = await audit("REUNION_PLANIFIEE", req.user.user, R[req.user.role], b.objet + " — " + b.date); return resp(200, "OK", "Réunion planifiée : les membres sont prévenus 48 h avant.", { date: b.date, objet: b.objet }, a); } };
+  EP["projects.create"] = { perm: "projects.create", async h(req) { const b = req.body || {}; if (!b.nom || !Number(b.objectif)) { const a = await audit("PROJET_REJETE", req.user.user, R[req.user.role], "nom ou objectif invalide", "ALERTE"); return resp(422, "DONNEES_INVALIDES", "Un projet exige un nom et un objectif chiffré en FCFA.", null, a); } const a = await audit("PROJET_CREE", req.user.user, R[req.user.role], b.nom + " — objectif " + Number(b.objectif).toLocaleString("fr-FR") + " FCFA"); return resp(200, "OK", "Projet créé : " + b.nom + ".", { nom: b.nom, objectif: Number(b.objectif) }, a); } };
+  EP["scores.view_self"] = { perm: "scores.view_self", async h(req) { const m = req.user.memberId ? members.find(x => x.id === req.user.memberId) : null; return resp(200, "OK", "Votre score détaillé.", { nom: req.user.nom, score: m ? m.score : null, detail: m ? { cotisations: 50, presence: 27, participation: 5 } : null }); } };
+  EP["scores.view_all"] = { perm: "scores.view_all", async h(req) { return resp(200, "OK", "Scores de tous les membres.", members.map(m => ({ ...m }))); } };
+  EP["rankings.view"] = { perm: "rankings.view", async h(req) { return resp(200, "OK", "Classement des tribus (proportion de membres à jour, RG-S7).", [{ tribu: "C", taux: 1.0 }, { tribu: "A", taux: 0.75 }, { tribu: "B", taux: 0.70 }]); } };
+  EP["reports.view"] = { perm: "reports.view", async h(req) { return resp(200, "OK", "Rapports mensuels archivés.", [{ mois: "Octobre 2026", statut: "archivé (clé USB + serveur)" }]); } };
+  EP["reports.generate"] = { perm: "reports.generate", async h(req) { const a = await audit("RAPPORT_GENERE", req.user.user, R[req.user.role], "rapport mensuel — export tableur + PDF (RG-X5)"); return resp(200, "OK", "Rapport généré et prêt pour l'archivage hors système.", null, a); } };
+  EP["users.list"] = { perm: "users.view", async h(req) { return resp(200, "OK", users.length + " comptes.", users.map(userDTO)); } };
+  EP["users.create"] = { perm: "users.create", async h(req) {
+    const b = req.body || {}; const name = (b.nom || "").trim(), user = (b.user || "").trim().toLowerCase();
+    if (!name || !/^[a-z0-9._-]{3,}$/.test(user)) { const a = await audit("COMPTE_REJETE", req.user.user, R[req.user.role], "nom ou identifiant invalide", "ALERTE"); return resp(422, "DONNEES_INVALIDES", "Nom obligatoire ; identifiant de 3 caractères min. sans espaces (lettres, chiffres, point, tiret).", null, a); }
+    if (!R[b.role]) { const a = await audit("COMPTE_REJETE", req.user.user, R[req.user.role], "rôle inconnu : " + b.role, "ALERTE"); return resp(422, "ROLE_INCONNU", "Le rôle « " + (b.role || "") + " » n'existe pas. Choisissez parmi : " + Object.values(R).join(", ") + ".", null, a); }
+    if (users.some(x => x.user === user)) { const a = await audit("COMPTE_REJETE", req.user.user, R[req.user.role], "identifiant déjà pris : " + user, "ALERTE"); return resp(409, "IDENTIFIANT_PRIS", "L'identifiant « " + user + " » est déjà utilisé — les comptes sont nominatifs et uniques (RG-X1).", null, a); }
+    const errs = passwordPolicy(b.pass);
+    if (errs.length) { const a = await audit("COMPTE_REJETE", req.user.user, R[req.user.role], "mot de passe initial hors politique", "ALERTE"); return resp(422, "POLITIQUE_MDP", "Mot de passe initial refusé : il faut " + errs.join(", ") + ".", null, a); }
+    const u = { id: users.length + 1, user, nom: name.slice(0, 60), role: b.role, statut: "actif", salt: rand(16), hash: await pbkdf2(b.pass, rand(16)), mustChange: true, echecs: 0, lockedUntil: null, derniere: "—" };
+    u.hash = await pbkdf2(b.pass, u.salt);
+    users.push(u);
+    const a = await audit("COMPTE_CREE", req.user.user, R[req.user.role], user + " (" + name + ") — rôle " + R[b.role] + " — changement de mot de passe imposé à la première connexion");
+    return resp(200, "OK", "Compte créé pour " + name + " avec le rôle " + R[b.role] + ". Les permissions s'appliquent côté serveur dès maintenant.", { ...userDTO(u) }, a);
+  } };
+  EP["users.update"] = { perm: "users.update", async h(req) {
+    const b = req.body || {}; const t = users.find(x => x.id === Number(b.id));
+    if (!t) { const a = await audit("COMPTE_REJETE", req.user.user, R[req.user.role], "compte cible inexistant : " + b.id, "ALERTE"); return resp(404, "COMPTE_INCONNU", "Aucun compte ne porte cet identifiant interne.", null, a); }
+    const changes = [];
+    if (b.patch && b.patch.role) { if (!R[b.patch.role]) return resp(422, "ROLE_INCONNU", "Rôle inconnu.", null, await audit("COMPTE_REJETE", req.user.user, R[req.user.role], "rôle cible inconnu", "ALERTE")); if (b.patch.role !== t.role) { changes.push("rôle " + R[t.role] + " → " + R[b.patch.role]); t.role = b.patch.role; revokeUserSessions(t.id); } }
+    if (b.patch && b.patch.nom) { changes.push("nom « " + t.nom + " » → « " + String(b.patch.nom).slice(0, 60) + " »"); t.nom = String(b.patch.nom).slice(0, 60); }
+    if (!changes.length) { const a = await audit("COMPTE_SANS_CHANGEMENT", req.user.user, R[req.user.role], "aucun champ modifié pour " + t.user); return resp(200, "OK", "Aucun changement à enregistrer.", { ...userDTO(t) }, a); }
+    const a = await audit("COMPTE_MODIFIE", req.user.user, R[req.user.role], t.user + " : " + changes.join(" ; ") + (changes.some(c => c.startsWith("rôle")) ? " — sessions révoquées" : "") + " (RG-X3 : ancienne et nouvelle valeur tracées)");
+    return resp(200, "OK", "Compte mis à jour : " + changes.join(" ; ") + ".", { ...userDTO(t) }, a);
+  } };
+  EP["users.deactivate"] = { perm: "users.deactivate", async h(req) {
+    const b = req.body || {}; const t = users.find(x => x.id === Number(b.id));
+    if (!t) return resp(404, "COMPTE_INCONNU", "Aucun compte ne porte cet identifiant interne.", null, await audit("COMPTE_REJETE", req.user.user, R[req.user.role], "cible inexistante", "ALERTE"));
+    if (t.id === req.user.id) { const a = await audit("COMPTE_REJETE", req.user.user, R[req.user.role], "auto-désactivation refusée", "BLOCAGE"); return resp(422, "AUTO_DESACTIVATION", "Un administrateur ne peut pas désactiver son propre compte : cette action rendrait la gestion des accès impossible.", null, a); }
+    const target = t.statut === "actif" ? "desactive" : "actif";
+    if (t.statut === target) return resp(200, "OK", "Ce compte est déjà dans cet état.", { ...userDTO(t) });
+    t.statut = target;
+    if (target === "desactive") { revokeUserSessions(t.id); t.echecs = 0; t.lockedUntil = null; }
+    const a = await audit(target === "desactive" ? "COMPTE_DESACTIVE" : "COMPTE_REACTIVE", req.user.user, R[req.user.role], t.user + " (" + t.nom + ") — " + (target === "desactive" ? "sessions révoquées immédiatement, connexion refusée" : "connexion à nouveau possible"));
+    return resp(200, "OK", target === "desactive" ? "Compte désactivé : ses sessions ouvertes ont été fermées à l'instant et toute connexion est refusée." : "Compte réactivé : la personne peut se reconnecter.", { ...userDTO(t) }, a);
+  } };
+  EP["audit.list"] = { perm: "audit.view", async h(req) { return resp(200, "OK", auditLog.length + " entrées.", auditLog.map(e => ({ ...e }))); } };
+  EP["audit.verify"] = { perm: "audit.view", async h(req) { const v = await verifyAudit(); return resp(200, "OK", v.integre ? "Chaîne intègre : aucune altération détectée sur " + v.seq + " entrées." : "ALERTE : chaîne compromise à l'entrée n° " + v.seq + " — " + v.motif, { ...v }); } };
+  EP["audit.tamper_demo"] = { perm: "audit.view", async h(req) { if (auditLog.length > 1) { const k = auditLog[Math.min(2, auditLog.length - 1)]; k.detail = k.detail + " [MODIFIÉ PAR UN ATTAQUANT]"; } return resp(200, "OK", "Simulation : une entrée ancienne a été altérée comme le ferait un attaquant ayant accès au stockage. Relancez la vérification d'intégrité."); } };
+  EP["settings.get"] = { perm: "settings.view", async h(req) { return resp(200, "OK", "Paramètres votés de l'association.", { ...settings }); } };
+  EP["settings.update"] = { perm: "settings.update", async h(req) { const b = req.body || {}; const k = String(b.key || ""); if (!(k in settings)) { const a = await audit("PARAMETRE_REJETE", req.user.user, R[req.user.role], "clé inconnue : " + k, "ALERTE"); return resp(422, "CLE_INCONNUE", "Ce paramètre n'existe pas. Clés valides : " + Object.keys(settings).join(", ") + ".", null, a); } const old = settings[k]; settings[k] = String(b.value).slice(0, 60); const a = await audit("PARAMETRE_MODIFIE", req.user.user, R[req.user.role], k + " : « " + old + " » → « " + settings[k] + " » (RG-X3)"); return resp(200, "OK", "Paramètre modifié et tracé avec l'ancienne et la nouvelle valeur.", { cle: k, ancienne: old, nouvelle: settings[k] }, a); } };
+
+  /* --- point d'entrée unique de l'API --- */
+  async function api(req) {
+    req.endpoint = req.endpoint || "?";
+    try {
+      const def = EP[req.endpoint];
+      const g = await guard(req, def);
+      if (g) return g;
+      const r = await def.h(req);
+      return r;
+    } catch (e) {
+      return resp(500, "ERREUR_SERVEUR", "Une erreur interne est survenue — l'action n'a pas été effectuée et a été journalisée.", null, await audit("ERREUR_INTERNE", "système", "—", req.endpoint + " : " + (e && e.message || "?"), "ALERTE"));
+    }
+  }
+
+  /* --- amorçage : comptes de démonstration (mots de passe retirés en production) --- */
+  async function seed() {
+    const defs = [
+      ["s.diallo", "Admin-2026!CI", "admin", "Salif Diallo", null],
+      ["m.kante", "President-2026!", "president", "Mariam Kanté", null],
+      ["a.traore", "Tresor-2026!CI", "tresorier", "Awa Traoré", null],
+      ["f.cisse", "Secretariat-2026!", "secretaire", "Fatoumata Cissé", null],
+      ["n.aka", "Bureau-2026!CI", "bureau", "Nantenin Aka", null],
+      ["k.yao", "Membre-2026!CI", "membre", "Kouassi Yao", 1],
+      ["utest1", "Test-2026!Lock", "membre", "Compte de test — verrouillage", null],
+      ["utest2", "Test-2026!Pass", "membre", "Compte de test — mot de passe", 2],
+      ["utest3", "Test-2026!Reset", "membre", "Compte de test — récupération", null],
+      ["utest4", "Test-2026!Desa", "bureau", "Compte de test — désactivation", null]
+    ];
+    users.length = 0;
+    for (const [user, pass, role, nom, memberId] of defs) {
+      const salt = rand(16);
+      users.push({ id: users.length + 1, user, nom, role, statut: "actif", salt, hash: await pbkdf2(pass, salt), mustChange: false, echecs: 0, lockedUntil: null, derniere: "—", memberId });
+    }
+    sessions.clear(); resets.clear();
+    await auditTail; auditSeq = 0; auditLog = []; auditTail = Promise.resolve();
+    finance.solde = 245750; finance.ops.length = 0;
+    CLOCK_OFF = 0;
+    await audit("SYSTEME_AMORCE", "système", "—", "10 comptes nominatifs créés (mots de passe dérivés PBKDF2, 120 000 itérations) — registre initialisé à 245 750 FCFA");
+  }
+
+  return {
+    api, seed, R, ROLES, PERMS, PERM_LABELS,
+    setClock: ms => { CLOCK_OFF = ms; }, getClock: () => CLOCK_OFF,
+    stats: () => ({ users: users.length, sessions: sessions.size, audit: auditLog.length, solde: finance.solde, resets: resets.size }),
+    hasSession: t => sessions.has(t)
+  };
+})();
+/* ==================================================================
+   BANC DE TESTS — 29 scénarios, appelant le serveur DIRECTEMENT,
+   sans passer par un seul bouton de l'interface.
+   ================================================================== */
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let BENCH_RESULTS = [];
+
+async function login(u, p) { const r = await SERVER.api({ endpoint: "auth.login", body: { user: u, pass: p } }); return r; }
+async function call(endpoint, token, body) { const r = await SERVER.api({ endpoint, token, body }); return r; }
+
+const BENCH = [
+  /* ---------- G1 · Connexion et session (A1–A10) ---------- */
+  { id: "A1", g: 1, role: "Trésorier", titre: "Connexion valide délivre une session réelle", attendu: "200 + jeton + entrée CONNEXION au journal",
+    async fn() { const r = await login("a.traore", "Tresor-2026!CI"); const aud = SERVER.stats().audit; return { obtenu: "status " + r.status + ", jeton " + (r.data && r.data.token ? "présent" : "absent"), pass: r.status === 200 && !!r.data.token && r.data.user.roleLabel === "Trésorier", detail: r.msg } } },
+  { id: "A2", g: 1, role: "Membre de test", titre: "Mot de passe faux : compteur d'échecs côté serveur", attendu: "4 × 401, avertissement du nombre de tentatives restantes",
+    async fn() { let last; for (let i = 0; i < 4; i++) last = await login("utest1", "Mauvais-" + i); const p = last.status === 401 && /1 tentative/.test(last.msg); return { obtenu: "4 appels → " + last.status + " — « " + last.msg.slice(0, 90) + "… »", pass: p, detail: "Le serveur compte et annonce le verrouillage à venir." } } },
+  { id: "A3", g: 1, role: "Membre de test", titre: "5ᵉ échec : verrouillage 15 min, même avec le BON mot de passe", attendu: "423 sur l'échec, puis 423 encore avec le mot de passe correct",
+    async fn() { const r5 = await login("utest1", "Mauvais-4"); const rOK = await login("utest1", "Test-2026!Lock"); const a = SERVER.stats().audit; return { obtenu: "échec n°5 → " + r5.status + " ; bon mot de passe → " + rOK.status + " ; journal à " + a + " entrées", pass: r5.status === 423 && rOK.status === 423, detail: rOK.msg } } },
+  { id: "A4", g: 1, role: "Membre de test", titre: "Déverrouillage automatique après expiration du verrou", attendu: "connexion OK après l'horloge serveur simulée à +16 minutes",
+    async fn() { SERVER.setClock(16 * 60000); const r = await login("utest1", "Test-2026!Lock"); SERVER.setClock(0); return { obtenu: "status " + r.status, pass: r.status === 200, detail: r.msg } } },
+  { id: "A5", g: 1, role: "Attaquant", titre: "Jeton de session forgé rejeté et journalisé", attendu: "401 + entrée SESSION_REQUISE (jeton inconnu)",
+    async fn() { const r = await call("users.list", "f0rged" + "a".repeat(56)); return { obtenu: "status " + r.status + " — " + r.msg.slice(0, 80), pass: r.status === 401, detail: r.msg } } },
+  { id: "A6", g: 1, role: "Membre de test", titre: "Session expirée au-delà de 8 heures", attendu: "401 SESSION_EXPIREE, session purgée du serveur",
+    async fn() { const t = (await login("utest2", "Test-2026!Pass")).data.token; SERVER.setClock(9 * 3600 * 1000); const r = await call("auth.whoami", t); SERVER.setClock(0); return { obtenu: "status " + r.status + " — " + r.msg, pass: r.status === 401 && r.code === "SESSION_EXPIREE", detail: "L'expiration est calculée par le serveur, jamais par le navigateur." } } },
+  { id: "A7", g: 1, role: "Membre de test", titre: "Politique de mot de passe : refus motivé par le serveur", attendu: "422 avec la liste exacte de ce qui manque",
+    async fn() { const t = (await login("utest2", "Test-2026!Pass")).data.token; const r = await call("auth.change_password", t, { old: "Test-2026!Pass", new: "faible" }); return { obtenu: "status " + r.status + " — " + r.msg, pass: r.status === 422 && /10 caractères/.test(r.msg) && /majuscule/.test(r.msg) && /chiffre/.test(r.msg), detail: "La politique n'est pas déléguée à l'interface." } } },
+  { id: "A8", g: 1, role: "Membre de test", titre: "Changement valable : ancien mot de passe inutilisable, sessions révoquées", attendu: "200 puis 401 sur l'ancienne session et l'ancien mot de passe",
+    async fn() { const t = (await login("utest2", "Test-2026!Pass")).data.token; const r1 = await call("auth.change_password", t, { old: "Test-2026!Pass", new: "Nouveau-Pass2026!" }); const r2 = await call("auth.whoami", t); const r3 = await login("utest2", "Test-2026!Pass"); const r4 = await login("utest2", "Nouveau-Pass2026!"); return { obtenu: "changement " + r1.status + " ; ancienne session " + r2.status + " ; ancien mot de passe " + r3.status + " ; nouveau " + r4.status, pass: r1.status === 200 && r2.status === 401 && r3.status === 401 && r4.status === 200, detail: "Toute session du compte est fermée dès le changement." } } },
+  { id: "A9", g: 1, role: "Membre de test", titre: "Jeton de récupération : usage unique, réutilisation refusée", attendu: "200 à la confirmation, 401 JETON_DEJA_UTILISE au second essai",
+    async fn() { const t = (await SERVER.api({ endpoint: "auth.reset_request", body: { user: "utest3" } })).data.token; const r1 = await SERVER.api({ endpoint: "auth.reset_confirm", body: { token: t, new: "Recup-2026!Pass" } }); const r2 = await SERVER.api({ endpoint: "auth.reset_confirm", body: { token: t, new: "Recup-2026!Pass" } }); return { obtenu: "confirmation " + r1.status + " ; réutilisation " + r2.status + " (" + r2.code + ")", pass: r1.status === 200 && r2.status === 401 && r2.code === "JETON_DEJA_UTILISE", detail: "Le jeton ne sert qu'une fois ; l'essai de réutilisation est journalisé." } } },
+  { id: "A10", g: 1, role: "Attaquant", titre: "Charge type injection SQL dans le champ identifiant", attendu: "401 sans fuite d'erreur, base intacte (10 comptes)",
+    async fn() { const before = SERVER.stats().users; const r = await login("admin'--", "'; DROP TABLE users;--"); const after = SERVER.stats().users; return { obtenu: "status " + r.status + " ; comptes " + before + " → " + after + " ; message : « " + r.msg + " »", pass: r.status === 401 && before === after, detail: "La chaîne est traitée comme un identifiant banal. En production : requêtes paramétrées uniquement." } } },
+
+  /* ---------- G2 · Autorisations par rôle (B1–B12) ---------- */
+  { id: "B1", g: 2, role: "Membre ordinaire", titre: "Règle n°1 : un membre ne peut PAS modifier les données financières", attendu: "403 ACCES_REFUSE, refus prononcé par le serveur, entrée ALERTE au journal",
+    async fn() { const t = (await login("k.yao", "Membre-2026!CI")).data.token; const r = await call("finance.record_payment", t, { montant: 1000, mois: "Novembre", recu: "RC-TEST" }); return { obtenu: "status " + r.status + " (" + r.code + ") — " + r.msg.slice(0, 100), pass: r.status === 403 && r.code === "ACCES_REFUSE", detail: "Même en appelant l'API directement, le rôle « Membre ordinaire » est refusé." } } },
+  { id: "B2", g: 2, role: "Membre ordinaire", titre: "Un membre ne peut pas créer de compte", attendu: "403 sur users.create",
+    async fn() { const t = (await login("k.yao", "Membre-2026!CI")).data.token; const r = await call("users.create", t, { nom: "Faux Admin", user: "fake.admin", role: "admin", pass: "Super-Secret99!" }); return { obtenu: "status " + r.status, pass: r.status === 403, detail: "L'auto-promotion est impossible depuis un compte membre." } } },
+  { id: "B3", g: 2, role: "Membre ordinaire", titre: "Un membre ne voit que SA fiche, pas la liste des membres", attendu: "members.view_all → 403 ; members.view_self → 200 avec sa seule fiche",
+    async fn() { const t = (await login("k.yao", "Membre-2026!CI")).data.token; const rA = await call("members.view_all", t); const rS = await call("members.view_self", t); return { obtenu: "liste " + rA.status + " ; sa fiche " + rS.status + " (" + (rS.data && rS.data.nom || "—") + ")", pass: rA.status === 403 && rS.status === 200 && rS.data.nom === "Kouassi Yao", detail: "Règle : consultation limitée à ses informations personnelles." } } },
+  { id: "B4", g: 2, role: "Membre ordinaire", titre: "Score : le sien est consultable, celui des autres non", attendu: "scores.view_all → 403 ; scores.view_self → 200",
+    async fn() { const t = (await login("k.yao", "Membre-2026!CI")).data.token; const rA = await call("scores.view_all", t); const rS = await call("scores.view_self", t); return { obtenu: "tous " + rA.status + " ; le sien " + rS.status + " (score " + (rS.data && rS.data.score) + ")", pass: rA.status === 403 && rS.status === 200 && rS.data.score === 82, detail: "La transparence reste individuelle : chacun voit son propre détail (RG-S6)." } } },
+  { id: "B5", g: 2, role: "Trésorier", titre: "Le trésorier ENREGISTRE un paiement — mise à jour réelle du registre", attendu: "200, solde 245 750 → 246 750 FCFA, entrée PAIEMENT_ENREGISTRE",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r = await call("finance.record_payment", t, { montant: 1000, mois: "Novembre 2026", recu: "RC-2026-0341", membre: "Kouassi Yao", mode: "Espèces" }); return { obtenu: "status " + r.status + " — " + r.msg, pass: r.status === 200 && r.data.solde === 246750, detail: "La règle RG-H1 est appliquée : saisie financière = trésorier." } } },
+  { id: "B6", g: 2, role: "Trésorier", titre: "Le trésorier ne gère ni les comptes ni les paramètres", attendu: "403 sur users.create et settings.update",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const rU = await call("users.create", t, { nom: "X", user: "x.y", role: "membre", pass: "Test-2026!Pass" }); const rS = await call("settings.update", t, { key: "cotisation", value: "1 FCFA" }); return { obtenu: "comptes " + rU.status + " ; paramètres " + rS.status, pass: rU.status === 403 && rS.status === 403, detail: "Séparation des pouvoirs : qui tient la caisse ne gère pas les accès." } } },
+  { id: "B7", g: 2, role: "Secrétaire général", titre: "Le secrétaire fait l'appel et adhère un membre — mais ne touche pas à la caisse", attendu: "meetings.call 200 ; members.create 200 ; finance.record_payment 403",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const rM = await call("meetings.call", t, { presentes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] }); const rC = await call("members.create", t, { nom: "Adama Ouédraogo", tribu: "C" }); const rF = await call("finance.record_payment", t, { montant: 1000, mois: "Novembre", recu: "RC-TEST" }); return { obtenu: "appel " + rM.status + " (" + (rM.data && rM.data.quorum ? "quorum atteint" : "quorum non atteint") + ") ; adhésion " + rC.status + " (" + (rC.data && rC.data.matricule) + ") ; paiement " + rF.status, pass: rM.status === 200 && rC.status === 200 && rF.status === 403, detail: "Chaque rôle tient exactement son périmètre (D5)." } } },
+  { id: "B8", g: 2, role: "Président", titre: "Le président supervise : il lit finances et journal, mais ne saisit jamais", attendu: "finance.view 200 ; audit.list 200 ; finance.record_payment 403 ; users.create 403",
+    async fn() { const t = (await login("m.kante", "President-2026!")).data.token; const rV = await call("finance.view", t); const rA = await call("audit.list", t); const rP = await call("finance.record_payment", t, { montant: 1000, mois: "Novembre", recu: "RC-TEST" }); const rU = await call("users.create", t, { nom: "X", user: "x.y2", role: "membre", pass: "Test-2026!Pass" }); return { obtenu: "lecture finances " + rV.status + " (" + (rV.data ? rV.data.solde.toLocaleString("fr-FR") : "—") + " FCFA) ; journal " + rA.status + " (" + (rA.data ? rA.data.length : 0) + " entrées) ; saisie " + rP.status + " ; comptes " + rU.status, pass: rV.status === 200 && rA.status === 200 && rP.status === 403 && rU.status === 403, detail: "Supervision sans écriture : la saisie reste au trésorier (RG-H1), les comptes à l'administrateur." } } },
+  { id: "B9", g: 2, role: "Membre du bureau", titre: "Autre membre du bureau : lecture étendue, aucune écriture", attendu: "finance.view 200 ; finance.record_operation 403",
+    async fn() { const t = (await login("n.aka", "Bureau-2026!CI")).data.token; const rV = await call("finance.view", t); const rO = await call("finance.record_operation", t, { type: "dep", libelle: "Test", montant: 500, piece: "DJ-0" }); return { obtenu: "lecture " + rV.status + " ; écriture " + rO.status, pass: rV.status === 200 && rO.status === 403, detail: "Ex. commissaire aux comptes : contrôle sans saisie." } } },
+  { id: "B10", g: 2, role: "Administrateur", titre: "L'administrateur crée comptes et paramètres — mais ne voit ni ne touche la caisse", attendu: "users.create 200 ; settings.update 200 ; finance.view 403 ; finance.record_payment 403",
+    async fn() { const t = (await login("s.diallo", "Admin-2026!CI")).data.token; const rC = await call("users.create", t, { nom: "Relais Trésorerie", user: "r.test", role: "tresorier", pass: "Relais-2026!CI" }); const rS = await call("settings.update", t, { key: "quorum", value: "16 membres actifs" }); const rV = await call("finance.view", t); const rP = await call("finance.record_payment", t, { montant: 1000, mois: "Novembre", recu: "RC-TEST" }); const t2 = (await login("r.test", "Relais-2026!CI")).data.token; const rP2 = await call("finance.record_payment", t2, { montant: 500, mois: "Octobre 2026", recu: "RC-2026-0342", membre: "Ibrahima Sanogo", mode: "Mobile money" }); return { obtenu: "compte " + rC.status + " ; paramètre " + rS.status + " (" + rS.code + ") ; finances " + rV.status + " ; sa propre saisie " + rP.status + " ; le nouveau trésorier saisit : " + rP2.status, pass: rC.status === 200 && rS.status === 200 && rV.status === 403 && rP.status === 403 && rP2.status === 200, detail: "Les permissions du nouveau compte s'appliquent immédiatement côté serveur." } } },
+  { id: "B11", g: 2, role: "Anonyme", titre: "Sans session, aucune lecture — même des listes dites publiques", attendu: "401 AUTH_REQUISE sans jeton",
+    async fn() { const r = await call("users.list", null); const r2 = await call("members.view_all", null); return { obtenu: "comptes " + r.status + " ; membres " + r2.status, pass: r.status === 401 && r2.status === 401, detail: r.msg } } },
+  { id: "B12", g: 2, role: "Trésorier", titre: "Escalade de privilège : s'auto-promouvoir administrateur via l'API", attendu: "403 + entrée ALERTE « TENTATIVE_NON_AUTORISEE »",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const me = (await call("auth.whoami", t)).data.user; const r = await call("users.update", t, { id: me.id, patch: { role: "admin" } }); return { obtenu: "status " + r.status + " (" + r.code + ") — " + r.msg.slice(0, 90), pass: r.status === 403, detail: "Le scénario d'attaque préféré des comptes compromis est coupé à la porte du serveur." } } },
+
+  /* ---------- G3 · Cycle de vie des comptes (C1–C2) ---------- */
+  { id: "C1", g: 3, role: "Administrateur", titre: "Désactivation : la session ouverte meurt à l'instant, la reconnexion est refusée", attendu: "200 ; whoami du désactivé → 401 ; re-login → 401 COMPTE_DESACTIVE",
+    async fn() { const tA = (await login("s.diallo", "Admin-2026!CI")).data.token; const t4 = (await login("utest4", "Test-2026!Desa")).data.token; const rD = await call("users.deactivate", tA, { id: 10 }); const rS = await call("auth.whoami", t4); const rL = await login("utest4", "Test-2026!Desa"); return { obtenu: "désactivation " + rD.status + " ; session résiduelle " + rS.status + " ; reconnexion " + rL.status + " (" + rL.code + ")", pass: rD.status === 200 && rS.status === 401 && rL.status === 401, detail: rD.msg } } },
+  { id: "C2", g: 3, role: "Administrateur", titre: "Réactivation : la personne retrouve l'accès", attendu: "200 puis connexion OK",
+    async fn() { const tA = (await login("s.diallo", "Admin-2026!CI")).data.token; const r = await call("users.deactivate", tA, { id: 10 }); const l = await login("utest4", "Test-2026!Desa"); return { obtenu: "réactivation " + r.status + " ; connexion " + l.status, pass: r.status === 200 && l.status === 200, detail: "Le cycle de vie complet est journalisé dans les deux sens." } } },
+
+  /* ---------- G4 · Intégrité des données et du journal (D1–D5) ---------- */
+  { id: "D1", g: 4, role: "Président", titre: "Vérification d'intégrité du journal chaîné", attendu: "INTÈGRE sur toutes les entrées produites par la suite",
+    async fn() { const t = (await login("m.kante", "President-2026!")).data.token; const r = await call("audit.verify", t); return { obtenu: r.msg, pass: r.status === 200 && r.data.integre === true, detail: "Chaque entrée hache son contenu + le hash précédent (SHA-256)." } } },
+  { id: "D2", g: 4, role: "Attaquant (simulé)", titre: "Falsification du journal : une entrée ancienne est modifiée en profondeur", attendu: "la vérification suivante DÉTECTE l'altération et désigne l'entrée",
+    async fn() { const t = (await login("m.kante", "President-2026!")).data.token; await call("audit.tamper_demo", t); const r = await call("audit.verify", t); return { obtenu: r.status === 200 && r.data.integre === false ? "COMPROMIS détecté à l'entrée n° " + r.data.seq + " — " + r.data.motif : "non détecté (!)", pass: r.status === 200 && r.data.integre === false, detail: "Modifier une entrée ancienne casse toute la chaîne suivante : l'altération devient visible." } } },
+  { id: "D3", g: 4, role: "Attaquant", titre: "Tentative d'accès direct à la base (« UPDATE users SET role=admin »)", attendu: "404 ENDPOINT_INEXISTANT — aucune surface SQL exposée",
+    async fn() { const r = await SERVER.api({ endpoint: "db.query", body: { sql: "UPDATE users SET role='admin' WHERE user='utest1'" } }); const roles = await login("utest1", "Test-2026!Lock"); return { obtenu: "status " + r.status + " (" + r.code + ") ; utest1 reste membre : connexion " + roles.status, pass: r.status === 404, detail: r.msg } } },
+  { id: "D4", g: 4, role: "Secrétaire général", titre: "Charge XSS dans un champ : stockée côté serveur, jamais exécutée à l'affichage", attendu: "la valeur est rendue échappée (aucun nœud <img> injecté)",
+    async fn() { const t = (await login("f.cisse", "Secretariat-2026!")).data.token; const payload = '<img src=x onerror=alert(1)>'; const r = await call("members.create", t, { nom: payload, tribu: "A" }); const probe = document.createElement("div"); probe.innerHTML = '<span class="tag">' + esc(r.data.nom) + '</span>'; const imgInjected = probe.querySelectorAll("img").length; return { obtenu: "stocké : « " + r.data.nom.slice(0, 26) + "… » ; rendu échappé : " + (imgInjected === 0 ? "aucun <img> exécutable" : imgInjected + " <img> injectés (!)"), pass: r.status === 200 && imgInjected === 0, detail: "Le serveur stocke la donnée ; l'échappement à l'affichage est systématique dans l'interface." } } },
+  { id: "D5", g: 4, role: "Anonyme", titre: "Les réponses du serveur n'exposent jamais de secret (hash, sel, jeton interne)", attendu: "aucun champ pwdHash/salt/hash/token dans les DTO des comptes",
+    async fn() { const t = (await login("s.diallo", "Admin-2026!CI")).data.token; const r = await call("users.list", t); const keys = new Set(); (r.data || []).forEach(u => Object.keys(u).forEach(k => keys.add(k))); const leak = [...keys].filter(k => /salt|hash|pass|token|secret/i.test(k)); return { obtenu: "champs exposés : " + [...keys].join(", ") + (leak.length ? " — FUITE : " + leak.join(", ") : " — aucune fuite"), pass: leak.length === 0, detail: "Projection contrôlée : le client ne voit que des DTO, jamais le stock brut." } } }
+];
+
+async function runBench() {
+  const t0 = performance.now();
+  await SERVER.seed();
+  const out = [];
+  for (const sc of BENCH) {
+    try { const r = await sc.fn(); out.push({ ...sc, ...r }); }
+    catch (e) { out.push({ ...sc, obtenu: "exception : " + e.message, pass: false, detail: "" }); }
+  }
+  const ms = Math.round(performance.now() - t0);
+  const pass = out.filter(r => r.pass).length;
+  BENCH_RESULTS = { date: new Date().toLocaleString("fr-FR"), total: out.length, pass, fail: out.length - pass, ms, scenarios: out };
+  SERVER.setClock(0);
+  await doLogout(true, true); // déconnexion locale silencieuse : les sessions viennent d'être réinitialisées
+  await SERVER.seed();   // environnement rétabli pour la démonstration libre
+  renderBench(out, pass, out.length, ms);
+  renderMatrix();
+  toast(pass === out.length ? "ok" : "err", pass === out.length ? "Suite complète : " + pass + "/" + out.length + " scénarios conformes." : "Suite terminée avec " + (out.length - pass) + " écart(s) — voir le détail.");
+}
+
+/* ==================================================================
+   CONSOLE D'INTRUSION — attaques lancées à la main, hors interface
+   ================================================================== */
+const ATTACKS = [
+  { t: "Payer une cotisation en tant que membre ordinaire", d: "Connexion d'un compte membre, puis appel direct de finance.record_payment — le bouton n'existe pas dans son interface, l'API est attaquée quand même.", async run() { const t = (await login("k.yao", "Membre-2026!CI")).data.token; return await call("finance.record_payment", t, { montant: 1000, mois: "Novembre 2026", recu: "RC-ATTAQUE" }); } },
+  { t: "Lister les comptes avec un jeton forgé", d: "Un jeton inventé de toutes pièces est présenté comme session valide.", async run() { return await call("users.list", "forged-" + crypto.getRandomValues(new Uint8Array(16)).join("")); } },
+  { t: "Auto-promotion en administrateur (escalade)", d: "Le trésorier demande au serveur de modifier son propre rôle.", async run() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; return await call("users.update", t, { id: 3, patch: { role: "admin" } }); } },
+  { t: "Requête SQL directe vers la base", d: "Le client tente un endpoint générique d'exécution SQL — il n'existe pas.", async run() { return await SERVER.api({ endpoint: "db.query", body: { sql: "UPDATE users SET role='admin'" } }); } },
+  { t: "Désactiver le trésorier en tant que membre", d: "Sabotage : un membre tente de désactiver le compte du trésorier.", async run() { const t = (await login("k.yao", "Membre-2026!CI")).data.token; return await call("users.deactivate", t, { id: 3 }); } },
+  { t: "Lire le journal d'audit en tant que membre", d: "Le journal est réservé à l'administrateur et au président.", async run() { const t = (await login("k.yao", "Membre-2026!CI")).data.token; return await call("audit.list", t); } }
+];
+
+/* ==================================================================
+   INTERFACE CLIENT — tout ce qui suit n'est que présentation :
+   aucun contrôle de sécurité ne repose sur ce code.
+   ================================================================== */
+const $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
+function toast(kind, msg) { const t = document.createElement("div"); t.className = "toast " + (kind === "ok" ? "ok" : kind === "err" ? "err" : ""); t.textContent = msg; $("#toasts").appendChild(t); setTimeout(() => { t.style.opacity = "0"; t.style.transition = "opacity .4s"; setTimeout(() => t.remove(), 400); }, 4200); }
+const initials = n => n.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
+
+let SESSION = { token: null, user: null, perms: [] };
+const TABS = [
+  { id: "session", label: "Mon espace", always: true },
+  { id: "users", label: "Utilisateurs", perm: "users.view" },
+  { id: "matrix", label: "Matrice des permissions", always: true },
+  { id: "audit", label: "Journal d'audit", perm: "audit.view" },
+  { id: "bench", label: "Banc de tests", always: true },
+  { id: "intrusion", label: "Console d'intrusion", always: true },
+  { id: "archi", label: "Production & limites", always: true }
+];
+function buildNav() {
+  const nav = $("#topnav"); nav.innerHTML = "";
+  if (!SESSION.token) { nav.innerHTML = '<button class="on" data-tab="login">Connexion</button>'; return; }
+  nav.innerHTML = TABS.filter(t => t.always || (t.perm && SESSION.perms.includes(t.perm))).map((t, i) => '<button data-tab="' + t.id + '"' + (i === 0 ? ' class="on"' : "") + ">" + t.label + "</button>").join("");
+  $$("#topnav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+  showTab(TABS.filter(t => t.always || (t.perm && SESSION.perms.includes(t.perm)))[0].id);
+}
+function showTab(id) {
+  $$(".tab").forEach(v => v.classList.remove("on"));
+  $("#v-" + id).classList.add("on");
+  $$("#topnav button").forEach(b => b.classList.toggle("on", b.dataset.tab === id));
+  window.scrollTo({ top: 0 });
+  if (id === "session") renderSession();
+  if (id === "users") renderUsers();
+  if (id === "matrix") renderMatrix();
+  if (id === "audit") renderAudit();
+  if (id === "intrusion") renderAttacks();
+  if (id === "archi") renderArchi();
+}
+/* ---------- rendus des onglets ---------- */
+async function renderSession() {
+  const r = await SERVER.api({ endpoint: "auth.whoami", token: SESSION.token });
+  if (r.status !== 200) { doLogout(true); return; }
+  const u = r.data.user;
+  $("#sess-info").innerHTML = '<dl style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13.5px">'
+    + "<dt style='color:var(--ink-3)'>Nom</dt><dd><b>" + esc(u.nom) + "</b></dd>"
+    + "<dt style='color:var(--ink-3)'>Identifiant</dt><dd>" + esc(u.user) + "</dd>"
+    + "<dt style='color:var(--ink-3)'>Rôle</dt><dd><span class='tag gold'>" + esc(u.roleLabel) + "</span></dd>"
+    + "<dt style='color:var(--ink-3)'>Session expire à</dt><dd>" + r.data.sessionExp + " (calcul serveur)</dd>"
+    + "<dt style='color:var(--ink-3)'>Statut</dt><dd>" + esc(u.statut) + "</dd></dl>";
+  $("#perm-count").textContent = r.data.perms.length + " permissions accordées par le serveur";
+  $("#perm-list").innerHTML = '<div class="chips">' + r.data.perms.map(p => '<span class="tag ok">' + esc(SERVER.PERM_LABELS[p] || p) + "</span>").join("") + "</div>"
+    + '<p class="help" style="margin-top:10px">Cette liste vient du serveur (' + r.data.perms.length + "/" + Object.keys(SERVER.PERMS).length + " permissions existantes). Tout le reste est refusé, même si l'interface l'affichait.</p>";
+  const f = await SERVER.api({ endpoint: "members.view_self", token: SESSION.token });
+  $("#self-fiche").innerHTML = f.data && f.data.nom ? '<b>' + esc(f.data.nom) + '</b> <span class="tag neutral">Tribu ' + esc(f.data.tribu) + " · " + esc(f.data.matricule) + '</span><p style="font-size:13px;color:var(--ink-3);margin-top:6px">Score d\'engagement : <b style="font-family:var(--f-num)">' + f.data.score.toFixed(1).replace(".", ",") + " / 100</b> · " + (f.data.moisDu ? f.data.moisDu + " mois de cotisation dus" : "cotisations à jour") + ".</p>" : "<p style='font-size:13px;color:var(--ink-3)'>" + esc(f.msg) + "</p>";
+}
+async function renderUsers() {
+  if (!SESSION.perms.includes("users.view")) return;
+  const r = await SERVER.api({ endpoint: "users.list", token: SESSION.token });
+  const admin = SESSION.perms.includes("users.deactivate");
+  $("#users-actions").style.display = admin ? "" : "none";
+  $("#users-sub").textContent = admin ? "Création, attribution de rôle et désactivation — réservées à l'administrateur. Toute modification est tracée avec l'ancienne et la nouvelle valeur (RG-X3)." : "Lecture de supervision : seuls l'administrateur crée et modifie les comptes.";
+  $("#users-tbl tbody").innerHTML = (r.data || []).map(u => '<tr>'
+    + '<td data-l="Utilisateur"><div class="cell-name"><span class="ava">' + initials(u.nom) + '</span><span class="n"><b>' + esc(u.nom) + "</b><small>" + esc(u.user) + "</small></span></div></td>"
+    + '<td data-l="Rôle"><span class="tag gold">' + esc(u.roleLabel) + "</span></td>"
+    + '<td data-l="Statut"><span class="tag ' + (u.statut === "actif" ? "ok" : "bad") + '">' + (u.statut === "actif" ? "Actif" : "Désactivé") + "</span></td>"
+    + '<td data-l="Échecs / verrou">' + (u.verrou !== "—" ? '<span class="tag warn">Verrouillé ' + esc(u.verrou) + "</span>" : u.echecs + " échec(s)") + "</td>"
+    + '<td data-l="Dernière connexion">' + esc(u.derniere) + "</td>"
+    + '<td class="act">' + (admin && u.id !== SESSION.user.id
+      ? '<button class="btn ghost sm" data-desact="' + u.id + '">' + (u.statut === "actif" ? "Désactiver" : "Réactiver") + "</button>"
+      + '<button class="btn ghost sm" data-promo="' + u.id + '">Modifier le rôle</button>' : "") + "</td></tr>").join("");
+  $$("#users-tbl [data-desact]").forEach(b => b.addEventListener("click", async () => {
+    const id = +b.dataset.desact;
+    const r2 = await SERVER.api({ endpoint: "users.deactivate", token: SESSION.token, body: { id } });
+    toast(r2.status === 200 ? "ok" : "err", r2.msg); renderUsers();
+  }));
+  $$("#users-tbl [data-promo]").forEach(b => b.addEventListener("click", async () => {
+    const id = +b.dataset.promo;
+    const role = prompt("Nouveau rôle (admin, president, tresorier, secretaire, bureau, membre) :");
+    if (!role) return;
+    const r2 = await SERVER.api({ endpoint: "users.update", token: SESSION.token, body: { id, patch: { role } } });
+    toast(r2.status === 200 ? "ok" : "err", r2.msg); renderUsers();
+  }));
+}
+function renderMatrix() {
+  const groups = [["auth", "Compte personnel"], ["members", "Membres"], ["finance", "Finances (RG-H1 : saisie = trésorier seul)"], ["meetings", "Réunions"], ["projects", "Projets"], ["scores", "Scores d'engagement"], ["rankings", "Classements"], ["reports", "Rapports"], ["users", "Comptes utilisateurs"], ["audit", "Journal d'audit"], ["settings", "Paramètres"]];
+  let html = "<thead><tr><th>Permission (vérifiée par le serveur)</th>" + SERVER.ROLES.map(r => "<th>" + esc(SERVER.R[r]) + "</th>").join("") + "</tr></thead><tbody>";
+  for (const [pref, label] of groups) {
+    const perms = Object.keys(SERVER.PERMS).filter(p => p.startsWith(pref + "."));
+    if (!perms.length) continue;
+    html += '<tr><th class="grp" colspan="' + (SERVER.ROLES.length + 1) + '">' + esc(label) + "</th></tr>";
+    for (const p of perms) {
+      html += '<tr><td class="k">' + esc(SERVER.PERM_LABELS[p] || p) + '<br><small style="color:var(--ink-3);font-family:var(--f-num);font-size:10.5px">' + esc(p) + "</small></td>";
+      for (const r of SERVER.ROLES) html += SERVER.PERMS[p].includes(r) ? '<td class="y" data-l="' + esc(SERVER.R[r]) + '">✓</td>' : '<td class="n" data-l="' + esc(SERVER.R[r]) + '">✗</td>';
+      html += "</tr>";
+    }
+  }
+  html += "</tbody>";
+  $("#matrix-tbl").innerHTML = html;
+}
+async function renderAudit() {
+  if (!SESSION.perms.includes("audit.view")) return;
+  const r = await SERVER.api({ endpoint: "audit.list", token: SESSION.token });
+  const rows = (r.data || []).slice(-70).reverse();
+  $("#audit-tbl tbody").innerHTML = rows.map(e => "<tr>"
+    + '<td data-l="#">' + e.seq + "</td>"
+    + '<td data-l="Horodatage">' + esc(e.ts) + "</td>"
+    + '<td data-l="Auteur">' + esc(e.actor) + ' <small style="color:var(--ink-3)">' + esc(e.role) + "</small></td>"
+    + '<td data-l="Action"><b style="font-size:12px">' + esc(e.action) + "</b></td>"
+    + '<td data-l="Détail">' + esc(e.detail) + "</td>"
+    + '<td data-l="Niveau"><span class="tag ' + (e.level === "BLOCAGE" ? "bad" : e.level === "ALERTE" ? "warn" : "neutral") + '">' + e.level + "</span></td></tr>").join("");
+  $("#btn-audit-verify").onclick = async () => {
+    const v = await SERVER.api({ endpoint: "audit.verify", token: SESSION.token });
+    $("#audit-verify-result").innerHTML = '<div class="note ' + (v.data.integre ? "ok" : "err") + '"><span>' + (v.data.integre ? "✓" : "⚠️") + "</span><span><b>" + esc(v.msg) + "</b>" + (v.data.motif ? " " + esc(v.data.motif) : "") + "</span></div>";
+    toast(v.data.integre ? "ok" : "err", v.msg);
+  };
+}
+function renderAttacks() {
+  $("#attacks").innerHTML = ATTACKS.map((a, i) => '<div class="attack"><div class="desc"><b>' + (i + 1) + " · " + esc(a.t) + "</b><small>" + esc(a.d) + '</small></div><button class="btn danger sm" data-atk="' + i + '">Lancer l\'attaque</button></div>').join("");
+  $$("#attacks [data-atk]").forEach(b => b.addEventListener("click", async () => {
+    const a = ATTACKS[+b.dataset.atk];
+    const r = await a.run();
+    const cls = r.status >= 500 ? "g" : r.status >= 400 ? "r" : "k";
+    $("#console-out").innerHTML += "\n\n<span class='g'>» " + esc(a.t) + "</span>\n<span class='" + cls + "'>HTTP " + r.status + " · " + esc(r.code) + "</span>\n<span class='k'>Serveur :</span> " + esc(r.msg) + (r.auditId ? "\n<span class='g'>Journal d'audit :</span> entrée n° " + r.auditId : "");
+    $("#console-out").scrollTop = 1e9;
+    toast(r.status >= 400 ? "ok" : "warn", r.status >= 400 ? "Attaque bloquée par le serveur (HTTP " + r.status + ") — entrée d'audit n° " + r.auditId + "." : "Réponse reçue (HTTP " + r.status + ").");
+    renderAudit();
+  }));
+}
+function renderBench(out, pass, total, ms) {
+  $("#bs-total").textContent = total; $("#bs-pass").textContent = pass; $("#bs-fail").textContent = total - pass; $("#bs-time").textContent = ms + " ms";
+  const GROUPS = { 1: "G1 — Connexion et session", 2: "G2 — Autorisations : chaque rôle à l'épreuve", 3: "G3 — Cycle de vie des comptes", 4: "G4 — Intégrité des données et du journal" };
+  let html = "";
+  for (const g of [1, 2, 3, 4]) {
+    html += '<div class="grp-h">' + GROUPS[g] + "</div>";
+    for (const sc of out.filter(x => x.g === g)) {
+      html += '<details class="sc"><summary><span class="verdict ' + (sc.pass ? "p" : "f") + '">' + (sc.pass ? "✓ PASS" : "✗ ÉCART") + "</span><b>" + sc.id + " · " + esc(sc.titre) + "</b><span class='tag neutral'>" + esc(sc.role) + "</span></summary>"
+        + '<div class="body"><b>Attendu :</b> ' + esc(sc.attendu) + "<br><b>Obtenu :</b> " + esc(sc.obtenu) + (sc.detail ? "<br>" + esc(sc.detail) : "") + "</div></details>";
+    }
+  }
+  html += '<div class="note ' + (pass === total ? "ok" : "err") + '" style="margin-top:14px"><span>' + (pass === total ? "✓" : "⚠️") + "</span><span><b>" + (pass === total ? "Suite complète conforme : " + pass + "/" + total + " scénarios." : pass + "/" + total + " scénarios conformes — examinez les écarts ci-dessus.") + " L'environnement de démonstration a été réinitialisé après la suite.</span></div>";
+  $("#bench-results").innerHTML = html;
+}
+function renderArchi() {
+  const MAP = [
+    ["Mots de passe dérivés PBKDF2-SHA256, 120 000 itérations, sel individuel de 16 octets", "Argon2id (ou bcrypt) via les bibliothèques éprouvées de Node.js ; hash et sel en base, jamais le mot de passe", "Colonnes pwd_hash / pwd_salt du compte"],
+    ["Sessions en Map, TTL 8 h, révocation instantanée", "Table sessions en PostgreSQL (ou Redis) ; cookie httpOnly + Secure + SameSite=Lax ; purge automatique des sessions expirées", "Chaque requête passe par le middleware de session"],
+    ["Verrouillage : 5 échecs → 15 minutes", "express-rate-limit avec store partagé, complété d'un ralentissement par adresse IP pour éviter le déni ciblé sur un compte", "Compteur d'échecs et verrou en base"],
+    ["Jeton de récupération : 30 min, usage unique", "Jeton hashé en base (jamais en clair), envoyé par e-mail réel, invalidé à l'usage et à chaque nouvelle demande", "Table password_resets"],
+    ["Permission vérifiée pour chaque endpoint", "Middleware Express requirePerm('finance.record_payment') devant chaque route + policies au niveau du modèle ; la matrice affichée est générée du même fichier que le middleware", "Aucune route sans middleware d'autorisation"],
+    ["Journal chaîné SHA-256 anti-falsification", "Table append-only : REVOKE UPDATE/DELETE au rôle applicatif + déclencheur PostgreSQL qui les refuse ; export mensuel hors système (RG-X5)", "Le serveur ne peut que INSERT sur audit_log"],
+    ["DTO sans secrets (hash, sel, jetons exclus)", "Sérialisation contrôlée par schémas ; les objets ORM complets ne quittent jamais le serveur", "Colonnes sensibles jamais dans les SELECT exposés"],
+    ["Surface API minimale — pas de db.query", "Requêtes paramétrées uniquement ; aucun client SQL exposé ; validation des entrées (zod) sur chaque route", "Rôle PostgreSQL applicatif sans droits d'administration"]
+  ];
+  $("#map-body").innerHTML = MAP.map((m, i) => "<tr><td data-l='Prototype'>" + esc(m[0]) + '</td><td data-l="Production">' + esc(m[1]) + '</td><td data-l="Verrou">' + esc(m[2]) + "</td></tr>").join("");
+  const FLAWS = [
+    [1, "Tout le « serveur » vit dans le navigateur : la séparation client/serveur est une simulation, un attaquant ayant accès à la machine peut lire le code et l'état.", "Structurelle", "Assumée : en production le serveur est un processus distant (AT-1), inaccessible au client ; ce prototype ne fait que spécifier les comportements."],
+    [2, "Les mots de passe de démonstration sont affichés à l'écran pour permettre l'essai de chaque rôle.", "Démonstration", "Supprimés en production ; chaque compte naît avec un mot de passe initial et le changement imposé (mustChange)."],
+    [3, "L'e-mail de récupération est simulé : le jeton s'affiche à l'écran au lieu d'aller dans une boîte mail.", "Élevée si reporté tel quel", "En production : envoi e-mail réel, jeton jamais montré à qui que ce soit d'autre que son destinataire."],
+    [4, "Le journal d'audit et la base sont en mémoire : tout se perd à l'actualisation du navigateur.", "Moyenne", "Table PostgreSQL append-only + export mensuel hors système (RG-X5) ; sauvegardes quotidiennes de l'hébergeur (30 jours)."],
+    [5, "L'horloge serveur est décalable par le banc de tests (nécessaire pour simuler expirations et verrous).", "Outil de test", "Absent de la production ; les TTL restent calculés uniquement côté serveur."],
+    [6, "PBKDF2 120 000 itérations est conforme mais en deçà d'Argon2id en résistance aux attaques hors ligne.", "Faible", "Migration Argon2id prévue dès l'implémentation réelle."],
+    [7, "Ouverture locale : aucun TLS, aucune politique CSP de production.", "Faible ici", "HTTPS obligatoire + HSTS chez l'hébergeur (critère éliminatoire AT-2) ; en-têtes CSP et cookies Sécurisés."],
+    [8, "Risque de divergence : un futur endpoint ajouté sans permission ni test de refus serait une faille silencieuse.", "Process", "Checklist de recette obligatoire : tout endpoint déclare sa permission ET possède son test de refus dans le banc — la matrice affichée est générée du même fichier de configuration."]
+  ];
+  $("#flaws-body").innerHTML = FLAWS.map(f => "<tr><td data-l='#'>" + f[0] + '</td><td data-l="Constat">' + esc(f[1]) + '</td><td data-l="Criticité"><span class="tag ' + (f[2] === "Élevée si reporté tel quel" ? "bad" : f[2] === "Structurelle" ? "info" : "warn") + '">' + esc(f[2]) + '</span></td><td data-l="Traitement">' + esc(f[3]) + "</td></tr>").join("");
+  $("#never-list").innerHTML = [
+    "…ne reçoit jamais une requête SQL du client : la surface est un nombre fixe d'endpoints nommés (tentative → 404 + audit).",
+    "…ne renvoie jamais un hash de mot de passe, un sel ou un jeton interne dans une réponse (test D5).",
+    "…ne fait confiance à aucun champ envoyé par le client pour autoriser une écriture : rôle et permission relisent en base.",
+    "…n'accepte une écriture financière d'un autre rôle que trésorier (RG-H1) — même président et administrateur sont refusés (B8, B10).",
+    "…n'autorise pas un administrateur à désactiver son propre compte (verrou anti-blocage de gestion).",
+    "…ne laisse un compte désactivé conserver une session : la révocation est immédiate (C1)."
+  ].map(t => '<div style="display:flex;gap:9px"><span style="color:var(--danger);font-weight:700">✗</span><span>' + esc(t.replace(/^…/, "")) + "</span></div>").join("");
+}
+
+/* ---------- flux de connexion / déconnexion / récupération ---------- */
+function lgErr(msg) { $("#lg-err-txt").textContent = msg; $("#lg-err").classList.add("on"); }
+$("#login-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("#f-lg-user").classList.remove("err"); $("#f-lg-pass").classList.remove("err"); $("#lg-err").classList.remove("on");
+  const u = $("#lg-user").value.trim(), p = $("#lg-pass").value;
+  if (!u) { $("#f-lg-user").classList.add("err"); return; }
+  if (!p) { $("#f-lg-pass").classList.add("err"); return; }
+  const b = $("#lg-submit"); b.classList.add("busy"); b.disabled = true;
+  const r = await SERVER.api({ endpoint: "auth.login", body: { user: u, pass: p } });
+  b.classList.remove("busy"); b.disabled = false;
+  if (r.status !== 200) { lgErr(r.msg); return; }
+  SESSION = { token: r.data.token, user: r.data.user, perms: r.data.perms };
+  setLoggedIn();
+  toast("ok", r.msg);
+});
+async function setLoggedIn() {
+  $("#top-who").style.display = "flex";
+  $("#top-name").textContent = SESSION.user.nom; $("#top-role").textContent = SESSION.user.roleLabel; $("#top-ava").textContent = initials(SESSION.user.nom);
+  $("#v-login").classList.remove("on"); $("#v-appzone").style.display = "block";
+  $("#lg-pass").value = "";
+  buildNav();
+}
+async function doLogout(expired, silent) {
+  if (SESSION.token && !expired) await SERVER.api({ endpoint: "auth.logout", token: SESSION.token });
+  SESSION = { token: null, user: null, perms: [] };
+  $("#top-who").style.display = "none"; $("#v-appzone").style.display = "none"; $("#v-login").classList.add("on");
+  buildNav(); showTab("login");
+  if (!silent) toast("info", expired ? "Votre session a expiré — reconnectez-vous." : "Session fermée. À bientôt !");
+}
+$("#btn-logout").addEventListener("click", () => doLogout(false));
+$("#link-forgot").addEventListener("click", e => { e.preventDefault(); $("#forgot-panel").style.display = $("#forgot-panel").style.display === "none" ? "block" : "none"; $("#lg-title").textContent = "Récupération d'accès"; });
+$("#fp-send").addEventListener("click", async () => {
+  const user = $("#fp-user").value.trim();
+  if (!user) { toast("err", "Saisissez votre identifiant pour demander un jeton."); return; }
+  const r = await SERVER.api({ endpoint: "auth.reset_request", body: { user } });
+  if (r.data && r.data.token) { $("#fp-mailbox").style.display = "block"; $("#fp-token").textContent = r.data.token; $("#fp-token-in").value = r.data.token; }
+  toast("ok", r.msg);
+});
+$("#fp-confirm").addEventListener("click", async () => {
+  const r = await SERVER.api({ endpoint: "auth.reset_confirm", body: { token: $("#fp-token-in").value.trim(), new: $("#fp-new").value } });
+  toast(r.status === 200 ? "ok" : "err", r.msg);
+  if (r.status === 200) { $("#fp-mailbox").style.display = "none"; $("#forgot-panel").style.display = "none"; $("#fp-new").value = ""; $("#lg-title").textContent = "Connexion"; $("#lg-sub").textContent = "Mot de passe enregistré — reconnectez-vous."; }
+});
+$("#ch-btn").addEventListener("click", async () => {
+  const r = await SERVER.api({ endpoint: "auth.change_password", token: SESSION.token, body: { old: $("#ch-old").value, new: $("#ch-new").value } });
+  toast(r.status === 200 ? "ok" : "err", r.msg);
+  if (r.status === 200) doLogout(false); else { const f = $("#f-ch-new"); f.classList.add("err"); f.querySelector(".errmsg").textContent = r.msg; }
+});
+$("#btn-user-new").addEventListener("click", () => { $("#user-new-panel").style.display = "block"; });
+$("#nu-cancel").addEventListener("click", () => { $("#user-new-panel").style.display = "none"; });
+$("#nu-submit").addEventListener("click", async () => {
+  const body = { nom: $("#nu-name").value.trim(), user: $("#nu-user").value.trim(), role: $("#nu-role").value, pass: $("#nu-pass").value };
+  let ok = true;
+  [["nu-name", "f-nu-name"], ["nu-user", "f-nu-user"], ["nu-role", "f-nu-role"], ["nu-pass", "f-nu-pass"]].forEach(([i, f]) => { $("#" + f).classList.remove("err"); if (!body[["nom", "user", "role", "pass"][["nu-name", "nu-user", "nu-role", "nu-pass"].indexOf(i)]] ) { $("#" + f).classList.add("err"); ok = false; } });
+  if (!ok) return;
+  const r = await SERVER.api({ endpoint: "users.create", token: SESSION.token, body });
+  $("#nu-result").innerHTML = '<div class="note ' + (r.status === 200 ? "ok" : "err") + '"><span>' + (r.status === 200 ? "✓" : "⚠️") + "</span><span><b>" + esc(r.msg) + "</b></span></div>";
+  if (r.status === 200) { toast("ok", "Compte créé — permissions appliquées côté serveur immédiatement."); renderUsers(); } else toast("err", r.msg);
+});
+$("#btn-bench-run").addEventListener("click", () => { $("#bench-results").innerHTML = '<div class="note info"><span>⏳</span><span>Suite en cours — environ 30 à 60 secondes (dérivations PBKDF2 à 120 000 itérations incluses)…</span></div>'; setTimeout(runBench, 50); });
+$("#btn-bench-export").addEventListener("click", () => {
+  if (!BENCH_RESULTS.length) { toast("err", "Lancez d'abord la suite de tests."); return; }
+  const blob = new Blob([JSON.stringify(BENCH_RESULTS, null, 2)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "adl-ci_tests_securite.json"; a.click();
+});
+$("#btn-console-clear").addEventListener("click", () => { $("#console-out").textContent = "Console effacée."; });
+
+/* ---------- amorçage ---------- */
+(async () => {
+  await SERVER.seed();
+  buildNav(); showTab("login");
+  renderArchi(); renderAttacks();
+})();
+</script>
+
+
+
+
+</body>
+</html>

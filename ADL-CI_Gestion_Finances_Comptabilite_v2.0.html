@@ -1,0 +1,1545 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADL-CI GESTION — Module financier et comptable v2.0</title>
+<!--
+  ADL-CI GESTION — Module financier et comptable v2.0
+  Association pour le Développement de Laabha — Section Côte d'Ivoire
+  Prototype autonome. Il applique les décisions et règles déjà arbitées du dossier :
+    D3 / RG-P1 : pénalité de 500 FCFA par mois de cotisation impayée au-delà du 10 ; calcul
+                 automatique le 11 ; la pénalité d'un mois est unique (pas de cumul sur le même mois).
+    RG-P2      : la pénalité cesse de courir dès le règlement du mois concerné.
+    RG-P3      : le bureau peut remettre tout ou partie d'une pénalité par décision tracée.
+    RG-C1      : cotisation de 1 000 FCFA par membre actif ; paramétrable, effet au mois suivant
+                 sans rétroactivité ; obligations déjà enregistrées non effacées.
+    RG-C2      : la cotisation du mois M est due au plus tard le 10 du mois M ; passé le 10 le mois
+                 M est « en retard » et déclenche la pénalité.
+    RG-C3      : imputation des paiements mois par mois dans l'ordre chronologique : cotisation du
+                 mois ancien, puis sa pénalité, puis mois suivant ; l'écran de saisie affiche cet
+                 ordre avant confirmation (confirmation en deux étapes, RG-F2).
+    RG-F1..F5  : saisie réservée au trésorier (D6), confirmation en deux étapes, aucune suppression
+                 (correction par contre-passation : la dépense erronée est annulée par une écriture
+                 inverse référencée), champs date/type/catégorie/montant/libellé + justificatif
+                 facultatif, rapprochement mensuel du solde avec les fonds réels.
+    RG-D1/D2   : dettes et créances avec partie, nature, montant, échéance, statut ; règlement
+                 enregistré comme opération financière liée.
+  Paramètres validés par le bureau : cotisation 1 000 FCFA, devise FCFA uniquement, saisie manuelle
+  par le trésorier, espèces et Mobile Money, aucune prétention de vérification automatique du
+  Mobile Money (référence de transaction saisie à la main, rapprochement mensuel RG-F5).
+  Règles NON précisées par le dossier : elles sont implémentées comme propositions clairement
+  étiquetées « Règle à valider » (onglet Production & limites) et soumises au bureau — aucune n'est
+  présentée comme une décision acquise.
+  Production visée (AT-1) : Node.js + Express / PostgreSQL / IndexedDB (Dexie).
+-->
+<style>
+:root{
+  --bg:#F6F3EC; --bg-soft:#EFEAE0; --bg-deep:#E7E1D3;
+  --primary:#2A4A3A; --primary-deep:#1D362B; --primary-soft:#3D6B54;
+  --accent:#C89F62; --accent-soft:#E9DBBE; --accent-faint:#F3ECD9;
+  --ink:#1C1B18; --ink-2:#4A473F; --ink-3:#7A7466;
+  --card:#FFFFFF; --line:#DCD5C6; --line-soft:#E8E2D4;
+  --ok:#2F7D4F; --ok-bg:#E6F1E9; --warn:#B97E1C; --warn-bg:#F7EEDC;
+  --danger:#A63D2F; --danger-bg:#F5E5E1; --info:#3E6C8E; --info-bg:#E4EDF3;
+  --shadow:0 1px 2px rgba(28,27,24,.06),0 4px 14px rgba(28,27,24,.08);
+  --shadow-lg:0 8px 30px rgba(28,27,24,.16);
+  --r:14px;
+  --f-title:'Lora',Georgia,serif; --f-ui:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --f-num:'IBM Plex Mono',ui-monospace,monospace;
+  --touch:44px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--f-ui);font-size:15px;line-height:1.55;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+button{font:inherit;cursor:pointer}
+input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3,h4{font-family:var(--f-title);font-weight:600;line-height:1.25;color:var(--primary)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px;border-radius:4px}
+.wrap{max-width:1180px;margin:0 auto;padding:22px 26px 80px}
+.top{position:sticky;top:0;z-index:50;background:var(--primary);color:#fff;padding:12px 26px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.top .logo{display:flex;align-items:center;gap:11px}
+.top .logo img{width:38px;height:38px}
+.top b{font-family:var(--f-title);font-size:17px;letter-spacing:.04em;display:block}
+.top small{font-size:10.5px;color:rgba(255,255,255,.65);letter-spacing:.08em;text-transform:uppercase;display:block}
+.top .who{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:13px}
+.top .who .ava{width:36px;height:36px;border-radius:50%;background:var(--accent);color:var(--primary-deep);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
+.top .who b{font-size:13.5px;font-family:var(--f-ui)}
+.top .who small{font-size:10px;text-transform:none;letter-spacing:0;color:var(--accent)}
+.topnav{background:var(--primary-deep);padding:0 14px;display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.topnav button{flex-shrink:0;background:none;border:none;color:rgba(255,255,255,.78);padding:12px 15px;font-size:13.5px;font-weight:600;border-bottom:3px solid transparent;min-height:var(--touch)}
+.topnav button.on{color:#fff;border-bottom-color:var(--accent)}
+.topnav button:hover{color:#fff}
+.tab{display:none}
+.tab.on{display:block;animation:fadein .25s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:var(--touch);padding:0 17px;border-radius:11px;border:1px solid transparent;font-weight:600;font-size:14px;transition:background .15s}
+.btn.pri{background:var(--primary);color:#fff}.btn.pri:hover{background:var(--primary-deep)}
+.btn.gold{background:var(--accent);color:var(--primary-deep)}.btn.gold:hover{background:#B9905A}
+.btn.ghost{background:#fff;color:var(--primary);border-color:var(--line)}.btn.ghost:hover{background:var(--bg-soft)}
+.btn.danger{background:var(--danger);color:#fff}.btn.danger:hover{background:#8F3226}
+.btn.sm{min-height:36px;padding:0 12px;font-size:12.5px;border-radius:9px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.card .card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 20px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+.card .card-h h2{font-size:16.5px}
+.card .card-b{padding:18px 20px}
+.card .card-b.tight{padding:0}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}
+.note{display:flex;gap:11px;padding:13px 15px;border-radius:12px;font-size:13.5px;border:1px solid;align-items:flex-start}
+.note b{display:block;margin-bottom:2px}
+.note.ok{background:var(--ok-bg);border-color:#CBE3D2;color:#275E3D}
+.note.warn{background:var(--warn-bg);border-color:#EBD9B4;color:#7A5314}
+.note.err{background:var(--danger-bg);border-color:#E7C7BF;color:#7E2E22}
+.note.info{background:var(--info-bg);border-color:#C9DBE7;color:#2C4E66}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.tag.ok{background:var(--ok-bg);color:var(--ok)}
+.tag.warn{background:var(--warn-bg);color:var(--warn)}
+.tag.bad{background:var(--danger-bg);color:var(--danger)}
+.tag.info{background:var(--info-bg);color:var(--info)}
+.tag.neutral{background:var(--bg-deep);color:var(--ink-2)}
+.tag.gold{background:var(--accent-soft);color:#7A5A2B}
+.field{margin-bottom:13px}
+.field label{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:6px}
+.field input,.field select,.field textarea{width:100%;min-height:var(--touch);border:1px solid var(--line);border-radius:10px;padding:10px 13px;background:#fff;font-size:14.5px}
+.field .help{font-size:12px;color:var(--ink-3);margin-top:5px}
+.field.err input,.field.err select,.field.err textarea{border-color:var(--danger);background:var(--danger-bg)}
+.field .errmsg{font-size:12.5px;color:var(--danger);margin-top:5px;display:none}
+.field.err .errmsg{display:block}
+.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table.tbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:560px}
+.tbl th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:700;padding:10px 13px;border-bottom:1px solid var(--line);background:var(--bg-soft);white-space:nowrap}
+.tbl td{padding:10px 13px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl .num{font-family:var(--f-num);text-align:right;white-space:nowrap}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px 18px}
+.kpi .lab{font-size:12px;color:var(--ink-3);font-weight:600}
+.kpi .val{font-family:var(--f-num);font-size:25px;font-weight:600;color:var(--primary);margin-top:5px;font-variant-numeric:tabular-nums}
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.ava{width:38px;height:38px;border-radius:50%;background:var(--accent-soft);color:#7A5A2B;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0}
+.cell-name{display:flex;align-items:center;gap:11px;min-width:0}
+.cell-name .n b{display:block;font-size:13.5px;white-space:nowrap}
+.cell-name .n small{color:var(--ink-3);font-size:11.5px}
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:22px 0 16px}
+.head h1{font-size:25px}
+.head .sub{color:var(--ink-3);font-size:13.5px;margin-top:3px;max-width:780px}
+.searchbar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+.searchbar .field{margin:0;flex:1;min-width:160px}
+.mat{font-family:var(--f-num);font-size:12px;background:var(--accent-faint);border:1px solid var(--accent-soft);border-radius:7px;padding:2px 8px;color:#7A5A2B;white-space:nowrap}
+.dl{display:grid;grid-template-columns:auto 1fr;gap:7px 16px;font-size:13.5px}
+.dl dt{color:var(--ink-3);white-space:nowrap}
+.dl dd{min-width:0;word-break:break-word}
+.mois-chip{display:inline-block;font-family:var(--f-num);font-size:11.5px;border-radius:7px;padding:2px 8px;margin:2px 3px 2px 0}
+.mois-chip.du{background:var(--warn-bg);color:var(--warn);border:1px solid #EBD9B4}
+.mois-chip.paye{background:var(--ok-bg);color:var(--ok);border:1px solid #CBE3D2}
+.mois-chip.partiel{background:var(--danger-bg);color:var(--danger);border:1px solid #E7C7BF}
+.mois-chip.avance{background:var(--info-bg);color:var(--info);border:1px solid #C9DBE7}
+.af-box{background:var(--accent-faint);border:1px solid var(--accent-soft);border-radius:11px;padding:12px 14px;font-size:13.5px}
+.af-row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--accent-soft);font-family:var(--f-num);font-size:12.5px}
+.af-row:last-child{border-bottom:none}
+.af-total{font-weight:700;border-top:2px solid var(--accent);margin-top:5px;padding-top:8px}
+.badge-v{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;background:var(--danger-bg);color:var(--danger);border:1px solid #E7C7BF;border-radius:6px;padding:2px 8px;vertical-align:middle}
+.step-head{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+.step-num{width:26px;height:26px;border-radius:50%;background:var(--primary);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0}
+.console{background:#152420;color:#D8E6DD;border-radius:12px;padding:14px 16px;font-family:var(--f-num);font-size:12.5px;line-height:1.6;overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+.console .k{color:#8FD0A9}.console .r{color:#F0A392}.console .g{color:#E9C88F}
+.attack{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+.attack:last-child{border-bottom:none}
+.attack .desc{flex:1;min-width:220px}
+.attack .desc b{display:block;font-size:13.5px}
+.attack .desc small{color:var(--ink-3);font-size:12px}
+.bench-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.verdict{font-weight:700;font-family:var(--f-num);font-size:12.5px}
+.verdict.p{color:var(--ok)}.verdict.f{color:var(--danger)}
+details.sc{border:1px solid var(--line-soft);border-radius:10px;margin:0 0 8px;background:#fff}
+details.sc summary{list-style:none;display:flex;gap:10px;align-items:center;padding:10px 14px;font-size:13px;cursor:pointer;flex-wrap:wrap}
+details.sc summary::-webkit-details-marker{display:none}
+details.sc .body{padding:10px 14px;border-top:1px solid var(--line-soft);font-size:12.5px;color:var(--ink-2);background:var(--bg-soft);border-radius:0 0 10px 10px}
+.grp-h{font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:700;margin:18px 0 10px}
+#toasts{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:150;display:flex;flex-direction:column;gap:8px;width:min(480px,calc(100vw - 24px))}
+.toast{background:var(--primary-deep);color:#fff;border-radius:12px;padding:12px 16px;font-size:13.5px;box-shadow:var(--shadow-lg);animation:fadein .25s}
+.toast.err{background:#843023}.toast.ok{background:#245C3B}
+.login-err{display:none;background:var(--danger-bg);border:1px solid #E7C7BF;color:#7E2E22;border-radius:10px;padding:11px 14px;font-size:13px;margin-bottom:14px}
+.login-err.on{display:flex;gap:9px;align-items:flex-start}
+.spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:rot .7s linear infinite;display:none}
+@keyframes rot{to{transform:rotate(360deg)}}
+.btn.busy .spin{display:inline-block}
+.creds{background:var(--accent-faint);border:1px solid var(--accent-soft);border-radius:11px;padding:11px 14px;font-size:12.5px;margin-top:15px}
+.creds code{font-family:var(--f-num);font-size:11.5px;background:#fff;border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+.creds .row{display:flex;justify-content:space-between;gap:8px;padding:3px 0;flex-wrap:wrap}
+.login-wrap{min-height:calc(100vh - 120px);display:grid;grid-template-columns:minmax(330px,42%) 1fr}
+.login-hero{background:var(--primary);color:#fff;padding:44px 40px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden}
+.login-hero::after{content:"";position:absolute;right:-70px;bottom:-70px;width:250px;height:250px;border-radius:50%;border:32px solid rgba(200,159,98,.16)}
+.login-hero h1{color:#fff;font-size:26px;margin:8px 0}
+.login-hero p{color:rgba(255,255,255,.8);font-size:14px;max-width:430px}
+.login-hero ul{list-style:none;display:grid;gap:11px;margin-top:20px}
+.login-hero li{display:flex;gap:10px;font-size:13.5px;color:rgba(255,255,255,.86)}
+.login-hero li b{color:var(--accent)}
+.login-hero .foot{font-size:11.5px;color:rgba(255,255,255,.55);position:relative;z-index:1}
+.login-form{display:flex;align-items:center;justify-content:center;padding:30px 20px;background:var(--bg)}
+.login-card{width:100%;max-width:410px}
+.login-card h2{font-size:21px;margin-bottom:4px}
+.af-total-row{display:flex;justify-content:space-between;font-weight:800;font-size:13px;margin-top:6px}
+@media(max-width:900px){.g2,.g3,.kpi-row,.bench-summary{grid-template-columns:1fr 1fr}.login-wrap{grid-template-columns:1fr}.login-hero{padding:30px 24px}.login-hero ul{display:none}.wrap{padding:16px 14px 70px}.top{padding:10px 14px}}
+@media(max-width:640px){.g2,.g3,.kpi-row,.bench-summary{grid-template-columns:1fr}.tbl-wrap{overflow:visible}table.tbl{min-width:0;border:none}.tbl thead{display:none}.tbl tr{display:block;background:#fff;border:1px solid var(--line);border-radius:12px;margin:0 0 10px;padding:6px 4px;box-shadow:var(--shadow)}.tbl td{display:flex;justify-content:space-between;align-items:center;gap:12px;border:none;padding:8px 12px}.tbl td::before{content:attr(data-l);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);flex-shrink:0}.tbl td.num{text-align:right}.tbl td.act{justify-content:flex-end}.tbl td.act::before{display:none}.tag{white-space:normal}.dl{grid-template-columns:1fr}.dl dt{margin-top:6px}.dl dd{margin-left:12px}.kpi-row{display:grid;grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="logo"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Ccircle cx='24' cy='24' r='21' fill='%23FFFFFF'/%3E%3Cpath d='M24 10l4.2 8.6 9.5 1.4-6.9 6.7 1.6 9.4L24 31.6l-8.4 4.5 1.6-9.4-6.9-6.7 9.5-1.4z' fill='%232A4A3A'/%3E%3C/svg%3E" alt="">
+  <span><b>ADL-CI GESTION</b><small>Module financier et comptable — v2.0</small></span></div>
+  <div class="who" id="top-who" style="display:none">
+    <span class="ava" id="top-ava">–</span>
+    <span><b id="top-name">–</b><small id="top-role">–</small></span>
+    <button class="btn gold sm" id="btn-logout">Déconnexion</button>
+  </div>
+</header>
+<nav class="topnav" id="topnav" aria-label="Sections"></nav>
+
+<!-- ============ CONNEXION ============ -->
+<div class="tab" id="v-login">
+  <div class="login-wrap">
+    <div class="login-hero">
+      <div>
+        <h1>Finances et comptabilité</h1>
+        <p>Le module applique les règles déjà arbitrées du dossier : cotisation due au plus tard le 10 (RG-C2), pénalité de 500 FCFA le 11 pour chaque mois impayé (D3, RG-P1), imputation des paiements mois par mois de la plus ancienne échéance à la plus récente, affichée avant confirmation (RG-C3, RG-F2), aucune suppression — correction par contre-passation référencée (RG-F3).</p>
+        <ul>
+          <li><b>Dus ≠ encaissés</b> : une pénalité calculée est une dette, jamais une recette encaissée.</li>
+          <li><b>Paiement partiel</b> : imputé sur l'échéance la plus ancienne, le reste reste dû.</li>
+          <li><b>Avances</b> : affectées aux périodes futures concernées, mois par mois.</li>
+          <li><b>Trésorerie</b> : calculée sur les entrées et sorties réellement enregistrées uniquement.</li>
+        </ul>
+      </div>
+      <div class="foot">Prototype v2.0 · Production visée : Node.js + Express / PostgreSQL (AT-1) · Devise FCFA · Données fictives de démonstration · Navigateur moderne requis.</div>
+    </div>
+    <div class="login-form">
+      <div class="login-card">
+        <h2>Connexion</h2>
+        <p style="font-size:13.5px;color:var(--ink-3);margin-bottom:16px">Le trésorier saisit les opérations (RG-F1) ; le bureau consulte ; chaque membre voit sa situation.</p>
+        <div id="lg-err" class="login-err" role="alert"><span>⚠️</span><span id="lg-err-txt"></span></div>
+        <form id="login-form" novalidate>
+          <div class="field" id="f-lg-user"><label for="lg-user">Identifiant <span style="color:var(--danger)">*</span></label>
+            <input id="lg-user" type="text" autocomplete="username" placeholder="Ex. : a.traore"><p class="errmsg">Saisissez votre identifiant.</p></div>
+          <div class="field" id="f-lg-pass"><label for="lg-pass">Mot de passe <span style="color:var(--danger)">*</span></label>
+            <input id="lg-pass" type="password" autocomplete="current-password" placeholder="Votre mot de passe"><p class="errmsg">Saisissez votre mot de passe.</p></div>
+          <button class="btn pri" id="lg-submit" type="submit" style="width:100%">Se connecter <span class="spin"></span></button>
+        </form>
+        <div class="creds">
+          <b style="display:block;margin-bottom:5px">Comptes de démonstration (retirés en production)</b>
+          <div class="row"><span>Trésorier — saisie des opérations</span><code>a.traore / Tresor-2026!CI</code></div>
+          <div class="row"><span>Administrateur — supervision + paramètres</span><code>s.diallo / Admin-2026!CI</code></div>
+          <div class="row"><span>Président — consultation totale</span><code>m.kante / President-2026!</code></div>
+          <div class="row"><span>Secrétaire général — lecture</span><code>f.cisse / Secretariat-2026!</code></div>
+          <div class="row"><span>Membre du bureau — lecture</span><code>n.aka / Bureau-2026!CI</code></div>
+          <div class="row"><span>Membre ordinaire — sa situation</span><code>k.yao / Membre-2026!CI</code></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap" id="v-appzone" style="display:none">
+  <!-- ============ COTISATIONS ============ -->
+  <div class="tab" id="v-cotis">
+    <div class="head"><div><h1>Cotisations, arriérés et pénalités</h1><p class="sub" id="cotis-sub">Les obligations suivent RG-C1 et RG-C2 : 1 000 FCFA par mois actif, due au plus tard le 10 ; passé le 10, le mois est en retard et la pénalité de 500 FCFA (D3) est constatée automatiquement comme écriture de dette — jamais comme recette.</p></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap" id="cotis-actions">
+        <button class="btn ghost" id="btn-export-fin">Exporter (tableur)</button>
+        <button class="btn pri" id="btn-pay-open">+ Encaisser un paiement</button>
+      </div></div>
+    <div id="panel-pay" style="display:none;margin-bottom:16px">
+      <div class="card"><div class="card-h"><h2>Encaisser un paiement (RG-F2 : deux étapes)</h2><button class="btn ghost sm" id="btn-pay-close">Fermer</button></div>
+        <div class="card-b">
+          <div class="grid g2">
+            <div>
+              <div class="step-head"><span class="step-num">1</span><b>Saisie des champs</b></div>
+              <div class="field" id="f-pay-mat"><label for="pay-mat">Membre (matricule) <span style="color:var(--danger)">*</span></label><select id="pay-mat"></select><p class="errmsg">Choisissez un membre du registre.</p></div>
+              <div class="field" id="f-pay-montant"><label for="pay-montant">Montant reçu (FCFA) <span style="color:var(--danger)">*</span></label><input id="pay-montant" type="number" min="1" step="1" placeholder="Ex. : 2000"><p class="help">Le paiement partiel est imputé sur l'échéance la plus ancienne (RG-C3) ; l'excédent va aux mois futurs (avance).</p><p class="errmsg">Montant invalide : entier strictement positif attendu.</p></div>
+              <div class="field" id="f-pay-mode"><label for="pay-mode">Mode de paiement <span style="color:var(--danger)">*</span></label><select id="pay-mode"><option>Espèces</option><option>Mobile Money</option></select><p class="help" id="help-mode">Mobile Money : la référence de transaction est saisie à la main par le trésorier — l'application ne prétend pas la vérifier automatiquement.</p></div>
+              <div class="field" id="f-pay-ref"><label for="pay-ref">Référence du reçu <span style="color:var(--danger)">*</span></label><input id="pay-ref" type="text" placeholder="Ex. : REC-2026-11-0009"><p class="help">Unique et obligatoire : elle empêche le double enregistrement.</p><p class="errmsg">Saisissez une référence de reçu.</p></div>
+              <button class="btn gold" id="btn-pay-preview" style="width:100%">Préparer l'opération (résumé)</button>
+            </div>
+            <div>
+              <div class="step-head"><span class="step-num">2</span><b>Résumé et imputation à confirmer</b></div>
+              <div id="pay-preview-zone"><div class="note info"><span>ℹ️</span><span><b>Complétez l'étape 1</b> : le résumé de l'opération et son imputation (RG-C3) s'affichent ici avant tout enregistrement.</span></div></div>
+              <div id="pay-confirm-zone" style="display:none;margin-top:10px">
+                <button class="btn pri" id="btn-pay-confirm" style="width:100%">Confirmer et enregistrer</button>
+                <p class="help" style="margin-top:6px">Aucune écriture n'est créée avant cette confirmation explicite (RG-F2).</p>
+              </div>
+              <div id="pay-result" style="margin-top:10px"></div>
+            </div>
+          </div>
+        </div></div>
+    </div>
+    <div class="kpi-row">
+      <div class="kpi"><span class="lab">Créances : cotisations dues non réglées</span><div class="val" id="k-cotis-due">–</div></div>
+      <div class="kpi"><span class="lab">Pénalités dues (dettes, non encaissées)</span><div class="val" id="k-pen-due">–</div></div>
+      <div class="kpi"><span class="lab">Membres en retard / à jour</span><div class="val" id="k-retard">–</div></div>
+      <div class="kpi gold"><span class="lab">Solde de trésorerie</span><div class="val" id="k-solde">–</div></div>
+    </div>
+    <div class="searchbar">
+      <div class="field" style="max-width:260px"><label for="fin-q">Filtrer (nom, matricule)</label><input id="fin-q" type="search" placeholder="Ex. : Sanogo, ADLCI-2025-0002"></div>
+      <div class="field" style="max-width:220px"><label for="fin-tribu">Tribu</label><select id="fin-tribu"><option value="">Toutes les tribus</option></select></div>
+      <div class="field" style="max-width:200px"><label for="fin-dus">Situation</label><select id="fin-dus"><option value="">Tous</option><option value="retard">En retard</option><option value="ajour">À jour</option></select></div>
+    </div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="cotis-tbl">
+      <thead><tr><th>Membre</th><th>Matricule</th><th>Tribu</th><th>Situation</th><th>Détail des créances</th><th>Créance totale</th><th>Payé à ce jour</th><th></th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ SITUATION D'UN MEMBRE ============ -->
+  <div class="tab" id="v-situation">
+    <div class="head"><div><h1 id="sit-title">Situation</h1><p class="sub" id="sit-sub">Calcul serveur : obligations RG-C1, échéances RG-C2, imputation RG-C3, pénalités RG-P1/P2.</p></div>
+      <button class="btn ghost" id="btn-sit-back">← Retour</button></div>
+    <div class="grid g2">
+      <div class="card"><div class="card-h"><h2>Situation de cotisation</h2></div><div class="card-b" id="sit-infos"></div></div>
+      <div class="card"><div class="card-h"><h2>Mois du registre</h2><span class="tag neutral">vert = réglé · ambre = en retard · rouge = partiel · bleu = avance</span></div><div class="card-b" id="sit-mois"></div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>Écritures de ce membre</h2></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="sit-tbl">
+      <thead><tr><th>N°</th><th>Quand</th><th>Type</th><th>Détail</th><th>Montant</th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ JOURNAL FINANCIER ============ -->
+  <div class="tab" id="v-journal">
+    <div class="head"><div><h1>Journal financier</h1><p class="sub">Toutes les écritures dans l'ordre de saisie : paiements imputés, constats de pénalité (dette, jamais recette), dépenses, autres recettes, règlements de dettes, contre-passations. Immuable : aucune écriture n'est modifiée ni effacée — toute correction est une écriture inverse référencée (RG-F3).</p></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap" id="journal-filters">
+        <div class="field" style="margin:0"><label for="jl-mat">Matricule</label><select id="jl-mat"><option value="">Tous</option></select></div>
+        <div class="field" style="margin:0"><label for="jl-type">Type</label><select id="jl-type"><option value="">Tous</option><option value="paiement">Paiements</option><option value="penalite">Constats de pénalité</option><option value="depense">Dépenses</option><option value="recette">Autres recettes</option><option value="reglement_dette">Règlements de dette</option><option value="contrepassation">Contre-passations</option></select></div>
+        <div class="field" style="margin:0"><label for="jl-mois">Mois d'effet</label><input id="jl-mois" type="month" min="2025-01" max="2026-12"></div>
+      </div></div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="jl-tbl">
+      <thead><tr><th>N°</th><th>Quand</th><th>Auteur</th><th>Type</th><th>Partie</th><th>Détail</th><th>Flux trésorerie</th><th></th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ RECETTES & DÉPENSES ============ -->
+  <div class="tab" id="v-rd">
+    <div class="head"><div><h1>Recettes, dépenses et dettes</h1><p class="sub">Saisie réservée au trésorier (RG-F1), confirmation en deux étapes (RG-F2), champs date, catégorie, montant, libellé et justificatif facultatif (RG-F4). Une dépense « à payer » est une dette : sa sortie de trésorerie n'a lieu qu'au règlement (RG-D2).</p></div></div>
+    <div class="grid g2">
+      <div class="card"><div class="card-h"><h2>Enregistrer une dépense</h2></div><div class="card-b">
+        <div class="step-head"><span class="step-num">1</span><b>Saisie</b></div>
+        <div class="field" id="f-dep-lib"><label for="dep-lib">Libellé <span style="color:var(--danger)">*</span></label><input id="dep-lib" type="text" placeholder="Ex. : Location salle assemblée"><p class="errmsg">Saisissez un libellé.</p></div>
+        <div class="field" id="f-dep-montant"><label for="dep-montant">Montant (FCFA) <span style="color:var(--danger)">*</span></label><input id="dep-montant" type="number" min="1" step="1"><p class="errmsg">Montant invalide.</p></div>
+        <div class="field" id="f-dep-date"><label for="dep-date">Date de l'opération <span style="color:var(--danger)">*</span></label><input id="dep-date" type="date" min="2025-01-01" max="2026-12-31"><p class="errmsg">Saisissez une date.</p></div>
+        <div class="field" id="f-dep-cat"><label for="dep-cat">Catégorie <span style="color:var(--danger)">*</span></label><select id="dep-cat"></select><p class="errmsg">Choisissez une catégorie.</p></div>
+        <div class="field" id="f-dep-statut"><label for="dep-statut">Statut</label><select id="dep-statut"><option value="payee">Payée (sortie de trésorerie immédiate)</option><option value="a_payer">À payer (dette — aucun flux tant qu'elle n'est pas réglée)</option></select></div>
+        <div class="field" id="f-dep-just"><label for="dep-just">Justificatif (facultatif)</label><input id="dep-just" type="text" placeholder="Ex. : FACT-2026-014 ou nom de la photo"><p class="help">Référence unique si fournie — en production : photo prise au téléphone (RG-F4).</p></div>
+        <div class="step-head" style="margin-top:6px"><span class="step-num">2</span><b>Résumé à confirmer</b></div>
+        <div id="dep-preview-zone"></div>
+        <div id="dep-confirm-zone" style="display:none;margin-top:8px"><button class="btn pri" id="btn-dep-confirm" style="width:100%">Confirmer et enregistrer la dépense</button></div>
+        <div id="dep-result" style="margin-top:10px"></div>
+      </div></div>
+      <div class="card"><div class="card-h"><h2>Autres recettes et règlements de dettes</h2></div><div class="card-b">
+        <div class="step-head"><span class="step-num">1</span><b>Recette hors cotisations (don, subvention)</b></div>
+        <div class="field" id="f-rec-src"><label for="rec-src">Source <span style="color:var(--danger)">*</span></label><input id="rec-src" type="text" placeholder="Ex. : Don partenaire Laabha"><p class="errmsg">Saisissez la source.</p></div>
+        <div class="field" id="f-rec-montant"><label for="rec-montant">Montant (FCFA) <span style="color:var(--danger)">*</span></label><input id="rec-montant" type="number" min="1" step="1"><p class="errmsg">Montant invalide.</p></div>
+        <div class="field" id="f-rec-mode"><label for="rec-mode">Mode</label><select id="rec-mode"><option>Espèces</option><option>Mobile Money</option></select></div>
+        <div class="field" id="f-rec-ref"><label for="rec-ref">Référence du reçu <span style="color:var(--danger)">*</span></label><input id="rec-ref" type="text" placeholder="Ex. : DON-2026-001"><p class="errmsg">Saisissez une référence.</p></div>
+        <div id="rec-preview-zone"></div>
+        <div id="rec-confirm-zone" style="display:none;margin-top:8px"><button class="btn pri" id="btn-rec-confirm" style="width:100%">Confirmer et enregistrer la recette</button></div>
+        <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
+        <div class="step-head"><span class="step-num">2</span><b>Régler une dette (dépense à payer)</b></div>
+        <div class="field" id="f-reg-dep"><label for="reg-dep">Dépense à payer <span style="color:var(--danger)">*</span></label><select id="reg-dep"></select><p class="help">Le règlement est une opération financière liée à la dette (RG-D2).</p></div>
+        <div class="field" id="f-reg-montant"><label for="reg-montant">Montant réglé (FCFA) <span style="color:var(--danger)">*</span></label><input id="reg-montant" type="number" min="1" step="1"><p class="errmsg">Montant invalide.</p></div>
+        <div class="field" id="f-reg-mode"><label for="reg-mode">Mode de règlement</label><select id="reg-mode"><option>Espèces</option><option>Mobile Money</option></select></div>
+        <div class="field" id="f-reg-ref"><label for="reg-ref">Référence <span style="color:var(--danger)">*</span></label><input id="reg-ref" type="text" placeholder="Ex. : REG-DETTE-001"><p class="errmsg">Saisissez une référence.</p></div>
+        <div id="reg-preview-zone"></div>
+        <div id="reg-confirm-zone" style="display:none;margin-top:8px"><button class="btn pri" id="btn-reg-confirm" style="width:100%">Confirmer le règlement de la dette</button></div>
+        <div id="reg-result" style="margin-top:10px"></div>
+      </div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>Dettes (dépenses à payer) et dernières dépenses</h2><span class="tag neutral" id="rd-count">–</span></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="rd-tbl">
+      <thead><tr><th>N°</th><th>Date</th><th>Libellé</th><th>Catégorie</th><th>Statut</th><th>Montant</th><th>Justificatif</th><th></th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ TRÉSORERIE & ÉTATS FINANCIERS ============ -->
+  <div class="tab" id="v-tresorerie">
+    <div class="head"><div><h1>Trésorerie et états financiers</h1><p class="sub">Le solde est calculé uniquement à partir des entrées et sorties réellement enregistrées : cotisations et pénalités <b>encaissées</b>, autres recettes, dépenses payées, règlements de dettes. Les pénalités calculées et non encaissées restent des dettes et n'entrent jamais dans la trésorerie.</p></div>
+      <button class="btn ghost" id="btn-export-etat">Exporter l'état financier</button></div>
+    <div class="kpi-row">
+      <div class="kpi gold"><span class="lab">Solde de trésorerie</span><div class="val" id="tk-solde">–</div></div>
+      <div class="kpi"><span class="lab">Encaissé (année)</span><div class="val" id="tk-enc">–</div></div>
+      <div class="kpi"><span class="lab">Dépenses payées (année)</span><div class="val" id="tk-dep">–</div></div>
+      <div class="kpi"><span class="lab">Créances membres (arriérés + pénalités)</span><div class="val" id="tk-creances">–</div></div>
+    </div>
+    <div class="card"><div class="card-h"><h2>Suivi des cotisations par mois et par année (2026)</h2></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="suivi-tbl">
+      <thead><tr><th>Mois</th><th>Cotisations dues</th><th>Encaissées</th><th>En attente</th><th>Taux</th><th>Pénalités constatées</th><th>Encaissé du mois (tous flux)</th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>État financier 2026 — montants dus, encaissés, décaissés</h2></div><div class="card-b" id="etat-fin"></div></div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>Dettes et créances (RG-D1)</h2><span class="tag warn">avance accordée = dette de l'association envers le membre</span></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="dc-tbl">
+      <thead><tr><th>Partie</th><th>Nature</th><th>Montant</th><th>Statut</th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>Rapprochement mensuel (RG-F5)</h2><span class="tag neutral">réservé trésorier et président</span></div><div class="card-b"><div class="grid g2">
+      <div><div class="field"><label for="rap-rel">Solde réel des fonds relevé (FCFA)</label><input id="rap-rel" type="number" step="1" placeholder="Saisissez le solde selon le relevé ou le décompte physique"></div>
+        <button class="btn ghost" id="btn-rap-compare">Confronter au solde de l'application</button></div>
+      <div id="rap-result"></div></div></div></div>
+  </div>
+
+  <!-- ============ PARAMÈTRES ============ -->
+  <div class="tab" id="v-param">
+    <div class="head"><div><h1>Paramètres comptables</h1><p class="sub">RG-C1 : toute modification votée prend effet à partir du mois suivant, sans effet rétroactif. Chaque version est tracée au journal d'audit ; les écritures déjà constatées conservent leur montant.</p></div></div>
+    <div class="grid g2">
+      <div class="card"><div class="card-h"><h2>Versions en vigueur</h2></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="param-tbl">
+        <thead><tr><th>Paramètre</th><th>Montant</th><th>Effet depuis</th><th>Origine</th></tr></thead>
+        <tbody></tbody></table></div></div></div>
+      <div class="card"><div class="card-h"><h2>Nouvelle version <span class="badge-v">règle à valider</span></h2></div><div class="card-b">
+        <div class="note warn" style="margin-bottom:12px"><span>⚠️</span><span><b>Règle non précisée dans le dossier :</b> qui peut modifier ces paramètres et selon quelle procédure. Proposition soumise au bureau : rôle administrateur, décision d'assemblée exigée dans le motif, effet au mois suivant (RG-C1). En attendant la validation, cette saisie reste opérationnelle pour la démonstration.</span></div>
+        <div class="field"><label for="par-type">Paramètre</label><select id="par-type"><option value="cotisation">Cotisation mensuelle</option><option value="penalite">Pénalité mensuelle de retard</option></select></div>
+        <div class="field"><label for="par-montant">Nouveau montant (FCFA)</label><input id="par-montant" type="number" min="1" step="1"></div>
+        <div class="field"><label for="par-depuis">Effet depuis le mois (RG-C1 : au moins le mois suivant)</label><input id="par-depuis" type="month" min="2025-01" max="2027-12"></div>
+        <div class="field"><label for="par-motif">Décision et référence <span style="color:var(--danger)">*</span></label><input id="par-motif" type="text" placeholder="Ex. : AG du 2026-11-15 — PV page 3"><p class="help">La référence de la décision est obligatoire et tracée au journal d'audit.</p></div>
+        <button class="btn pri" id="btn-par-set">Créer la nouvelle version</button>
+        <div id="par-result" style="margin-top:10px"></div></div></div>
+    </div>
+  </div>
+
+  <!-- ============ BANC DE TESTS ============ -->
+  <div class="tab" id="v-bench">
+    <div class="head"><div><h1>Banc de tests du module financier et comptable</h1><p class="sub">24 scénarios avec des données fictives couvrant les cas demandés : paiement complet, paiement partiel, avance, retard, pénalité, dépense, correction. Chaque calcul est confronté à un recalcul indépendant effectué depuis le journal brut — les chiffres du serveur doivent coïncider exactement.</p></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn pri" id="btn-bench-run">Lancer tous les tests</button><button class="btn ghost" id="btn-bench-export">Exporter (JSON)</button></div></div>
+    <div class="bench-summary">
+      <div class="kpi gold"><span class="lab">Scénarios exécutés</span><div class="val" id="bs-total">–</div></div>
+      <div class="kpi"><span class="lab">Conformes (✓)</span><div class="val" id="bs-pass">–</div></div>
+      <div class="kpi"><span class="lab">Écarts (✗)</span><div class="val" id="bs-fail">–</div></div>
+      <div class="kpi"><span class="lab">Durée</span><div class="val" id="bs-time">–</div></div>
+    </div>
+    <div id="bench-results"><div class="note info"><span>▶</span><span><b>Lancez la suite.</b> Données fictives uniquement ; l'environnement est réinitialisé avant et après l'exécution.</span></div></div>
+  </div>
+
+  <!-- ============ CONSOLE D'INTRUSION ============ -->
+  <div class="tab" id="v-intrusion">
+    <div class="head"><div><h1>Console d'intrusion</h1><p class="sub">Attaques hors de l'interface : saisie par un non-trésorier (RG-F1), remise de pénalité par le président, suppression d'opération (n'existe pas — RG-F3), paramètres modifiés sans autorisation, jeton forgé.</p></div></div>
+    <div class="card" style="margin-bottom:16px"><div id="attacks"></div></div>
+    <div class="card"><div class="card-h"><h2>Réponses brutes du serveur</h2><button class="btn ghost sm" id="btn-console-clear">Effacer la console</button></div><div class="card-b"><div class="console" id="console-out">Console prête. Choisissez une attaque ci-dessus.</div></div></div>
+  </div>
+
+  <!-- ============ PRODUCTION & LIMITES ============ -->
+  <div class="tab" id="v-archi">
+    <div class="head"><div><h1>Règles appliquées, propositions à valider et correspondance production</h1><p class="sub">Le module n'invente aucune règle comptable : tout ce qui était déjà arbitré dans le dossier (D3, RG-C1/C2/C3, RG-P1/P2/P3, RG-F1 à F5, RG-D1/D2) est appliqué tel quel ; ce qui ne l'était pas est implémenté comme <b>proposition explicitement étiquetée</b> et soumis à la validation du bureau.</p></div></div>
+    <div class="card"><div class="card-h"><h2>Règles appliquées telles qu'arbitrées dans le dossier</h2></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="regles-tbl">
+      <thead><tr><th>Réf.</th><th>Règle appliquée</th><th>Implémentation dans le module</th></tr></thead>
+      <tbody id="regles-body"></tbody></table></div></div></div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>Propositions soumises à la validation du bureau <span class="badge-v">aucune règle inventée n'est présentée comme acquise</span></h2></div>
+      <div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="valider-tbl">
+        <thead><tr><th>#</th><th>Point non précisé dans le dossier</th><th>Proposition implémentée (réversible)</th><th>Demande</th></tr></thead>
+        <tbody id="valider-body"></tbody></table></div></div></div>
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card"><div class="card-h"><h2>Du prototype à la production</h2></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="map-tbl">
+        <thead><tr><th>Mécanisme (prototype)</th><th>Implémentation de production</th><th>Verrou</th></tr></thead>
+        <tbody id="map-body"></tbody></table></div></div></div>
+      <div class="card"><div class="card-h"><h2>Limites assumées</h2><span class="tag warn">honnêteté avant tout</span></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="flaws-tbl">
+        <thead><tr><th>#</th><th>Constat</th><th>Traitement en production</th></tr></thead>
+        <tbody id="flaws-body"></tbody></table></div></div></div>
+    </div>
+  </div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+<script>
+"use strict";
+/* ==================================================================
+   SERVEUR SIMULÉ — comptes, registre, journal financier COMPTABLE.
+   Règles implémentées telles qu'arbitrées : RG-C1/C2/C3, RG-P1/P2/P3,
+   RG-F1..F5, RG-D1/D2, D3. Le client ne reçoit que des projections DTO.
+   ================================================================== */
+const SERVER = (() => {
+  const enc = new TextEncoder();
+  if (!window.crypto || !crypto.subtle) { alert("Navigateur sans Web Crypto : ce prototype exige un navigateur moderne."); throw new Error("no crypto"); }
+  async function sha256(str) {
+    const d = await crypto.subtle.digest("SHA-256", enc.encode(str));
+    return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  async function pbkdf2(pass, saltHex, iters = 120000) {
+    const key = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveBits"]);
+    const salt = new Uint8Array((saltHex.match(/../g) || []).map(h => parseInt(h, 16)));
+    const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: iters }, key, 256);
+    return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  const rand = n => [...crypto.getRandomValues(new Uint8Array(n))].map(b => b.toString(16).padStart(2, "0")).join("");
+
+  /* Période de démonstration : aujourd'hui fictif = 19 novembre 2026 (après le 10 de RG-C2 :
+     la cotisation du mois courant impayée est donc déjà « en retard » et pénalisée). */
+  const AUJ = { date: "2026-11-19", mois: "2026-11", jour: 19 };
+  const DEVISE = "FCFA";
+  const MODES = ["Espèces", "Mobile Money"];
+  const CATEGORIES = ["Fonctionnement", "Événements", "Solidarité", "Investissement", "Divers"]; /* proposition V5 */
+  const AVANCE_MAX_MOIS = 24;
+  const now = () => Date.now();
+  const iso = () => new Date(now()).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  const SESSION_TTL = 8 * 3600 * 1000;
+  const users = [], sessions = new Map();
+  let auditSeq = 0, auditLog = [], auditTail = Promise.resolve();
+  async function _audit(action, actor, role, detail, level) {
+    const e = { seq: ++auditSeq, ts: iso(), actor: actor || "système", role: role || "—", action, detail: detail || "", level: level || "INFO", prev: auditLog.length ? auditLog[auditLog.length - 1].hash : "GENÈSE" };
+    e.hash = await sha256([e.seq, e.ts, e.actor, e.action, e.detail, e.prev].join("|"));
+    auditLog.push(e);
+    return e.seq;
+  }
+  function audit(action, actor, role, detail, level) {
+    const p = auditTail.then(() => _audit(action, actor, role, detail, level));
+    auditTail = p.then(() => undefined, () => undefined);
+    return p;
+  }
+  async function verifyAudit() {
+    let prev = "GENÈSE";
+    for (const e of auditLog) {
+      const h = await sha256([e.seq, e.ts, e.actor, e.action, e.detail, e.prev].join("|"));
+      if (e.prev !== prev) return { integre: false, seq: e.seq, motif: "chaîne rompue (lien avec l'entrée précédente)" };
+      if (h !== e.hash) return { integre: false, seq: e.seq, motif: "contenu modifié (hash recomposé différent)" };
+      prev = e.hash;
+    }
+    return { integre: true, seq: auditSeq, motif: "" };
+  }
+
+  const R = { admin: "Administrateur", president: "Président", tresorier: "Trésorier", secretaire: "Secrétaire général", bureau: "Autre membre du bureau", membre: "Membre ordinaire" };
+  const PERMS = {
+    "auth.self":          ["admin","president","tresorier","secretaire","bureau","membre"],
+    "members.view_self":  ["admin","president","tresorier","secretaire","bureau","membre"],
+    "members.view_all":   ["admin","president","tresorier","secretaire","bureau"],
+    "finance.view_self":  ["admin","president","tresorier","secretaire","bureau","membre"],
+    "finance.view_all":   ["admin","president","tresorier","secretaire","bureau"],
+    "finance.create":     ["tresorier"],
+    "params.set":         ["admin"], /* proposition V4 — étiquetée règle à valider */
+    "audit.view":         ["admin","president"]
+  };
+
+  /* ── Registre (reprise du module validé 6f) — la date de désactivation fait partie
+     de la fiche : les obligations mensuelles ne courent que pendant l'activité (RG-C1),
+     celles enregistrées avant la désactivation restent dues (module membres) ── */
+  const members = [], mCounter = {};
+  const norm = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const mDTO = m => ({ id: m.id, matricule: m.matricule, nom: m.nom, prenom: m.prenom, tribu: m.tribu, statut: m.statut, date_adhesion: m.date_adhesion, date_desactivation: m.date_desactivation || null });
+  function nextMatricule(year) { mCounter[year] = (mCounter[year] || 0) + 1; return "ADLCI-" + year + "-" + String(mCounter[year]).padStart(4, "0"); }
+  const findMatricule = mat => members.find(m => m.matricule === String(mat || "").trim());
+
+  /* ── Paramètres versionnés (RG-C1 : effet au mois suivant, sans rétroactivité) ── */
+  const params = { cotisation: [{ montant: 1000, depuis: "2025-01", origine: "Cahier des charges validé (D3, annexe A)" }], penalite: [{ montant: 500, depuis: "2025-01", origine: "Décision D3 : pénalité fixe au-delà du 10" }] };
+  const montantPour = (type, mois) => { const v = params[type].filter(x => x.depuis <= mois).sort((a, b) => b.depuis.localeCompare(a.depuis)); return v.length ? v[0].montant : params[type][0].montant; };
+
+  /* ── Temps : mois, activité, échéance RG-C2 ── */
+  const idx = ym => { const [y, m] = String(ym).split("-").map(Number); return y * 12 + (m - 1); };
+  const moisDe = i => Math.floor(i / 12) + "-" + String(i % 12 + 1).padStart(2, "0");
+  const moisActifs = m => { const a = idx(m.date_adhesion.slice(0, 7)); const fin = m.date_desactivation ? idx(m.date_desactivation.slice(0, 7)) : idx(AUJ.mois); const out = []; for (let i = a; i <= fin; i++) out.push(moisDe(i)); return out; };
+  const estEnRetard = (m, mois) => { const i = idx(mois); if (i > idx(AUJ.mois)) return false; if (i === idx(AUJ.mois) && AUJ.jour < 11) return false; return true; };
+  const estFutur = mois => idx(mois) > idx(AUJ.mois);
+
+  /* ── Journal financier : chaque écriture porte un flux trésorerie signé
+     (entrée +, sortie −) ou zéro pour les dettes calculées ── */
+  const ledger = [];
+  const isAnnule = no => ledger.some(e => e.type === "contrepassation" && e.cible === no);
+  const valid = () => ledger.filter(e => !isAnnule(e.no));
+  const refsUtilisees = () => new Set(valid().filter(e => e.ref).map(e => e.ref.toLowerCase()));
+  const justUtilises = () => new Set(valid().filter(e => e.justificatif).map(e => e.justificatif.toLowerCase()));
+
+  /* Réglé par mois de cotisation : imputations des paiements non annulés (RG-C3) */
+  function settledCotis(matricule, mois) {
+    let s = 0;
+    for (const e of ledger) {
+      if (e.type !== "paiement" || isAnnule(e.no) || e.matricule !== matricule) continue;
+      for (const a of e.affectations || []) if ((a.kind === "cotis" || a.kind === "avance") && a.mois === mois) s += a.montant;
+    }
+    return s;
+  }
+  function settledPen(no_penalite) {
+    let s = 0;
+    for (const e of ledger) {
+      if (e.type !== "paiement" || isAnnule(e.no)) continue;
+      for (const a of e.affectations || []) if (a.kind === "penalite" && a.no_penalite === no_penalite) s += a.montant;
+    }
+    return s;
+  }
+  /* Constat de pénalité RG-P1 : une écriture de dette unique par (membre, mois en retard) ;
+     RG-P2 : aucun constat pour un mois réglé ; le constat existant reste dû après règlement ;
+     RG-P3 : un mois dont la pénalité a été remise par décision du bureau ne re-constate pas. */
+  const remises = [];
+  function constatsDe(matricule, mois) { return ledger.filter(e => e.type === "penalite" && e.matricule === matricule && e.mois_cible === mois); }
+  function ensurePenalites() {
+    let n = 0;
+    for (const m of members) {
+      for (const mois of moisActifs(m)) {
+        if (idx(mois) > idx(AUJ.mois)) continue;
+        if (!estEnRetard(m, mois)) continue;
+        if (settledCotis(m.matricule, mois) >= montantPour("cotisation", mois)) continue; /* RG-P2 */
+        if (remises.some(r => r.matricule === m.matricule && r.mois_cible === mois)) continue; /* RG-P3 */
+        if (constatsDe(m.matricule, mois).length) continue;
+        ledger.push({ no: ledger.length + 1, ts: iso(), actor: "système (constat automatique RG-P1)", type: "penalite", date: AUJ.date, matricule: m.matricule, mois_cible: mois, montant: montantPour("penalite", mois), flux: 0, ref: null, motif: null });
+        n++;
+      }
+    }
+    return n;
+  }
+  function penalitesDuMatricule(matricule) {
+    const out = [];
+    for (const p of valid().filter(e => e.type === "penalite" && e.matricule === matricule)) {
+      const reste = p.montant - settledPen(p.no);
+      out.push({ no: p.no, mois_cible: p.mois_cible, montant: p.montant, regle: p.montant - reste, reste });
+    }
+    return out;
+  }
+
+  /* Imputation RG-C3 : mois par mois, cotisation puis SA pénalité, puis mois suivant ;
+     l'excédent va aux mois futurs (avance) pour un membre actif. */
+  function computeAffectation(montant, matricule) {
+    const m = findMatricule(matricule);
+    let reste = montant;
+    const items = [];
+    for (const mois of moisActifs(m)) {
+      if (idx(mois) > idx(AUJ.mois)) continue;
+      const due = montantPour("cotisation", mois);
+      const manq = due - settledCotis(m.matricule, mois);
+      if (manq > 0 && reste > 0) { const x = Math.min(reste, manq); items.push({ kind: "cotis", mois, montant: x }); reste -= x; }
+      if (reste <= 0) continue;
+      for (const p of penalitesDuMatricule(m.matricule).filter(x => x.mois_cible === mois && x.reste > 0)) {
+        const x = Math.min(reste, p.reste); items.push({ kind: "penalite", mois, no_penalite: p.no, montant: x }); reste -= x;
+        if (reste <= 0) break;
+      }
+      if (reste <= 0) break;
+    }
+    if (reste > 0 && m.statut === "actif") {
+      let i = idx(AUJ.mois) + 1;
+      while (reste > 0 && i <= idx(AUJ.mois) + AVANCE_MAX_MOIS) {
+        const mois = moisDe(i);
+        const manq = montantPour("cotisation", mois) - settledCotis(m.matricule, mois);
+        if (manq > 0) { const x = Math.min(reste, manq); items.push({ kind: "avance", mois, montant: x }); reste -= x; }
+        i++;
+      }
+    }
+    return { items, reste };
+  }
+
+  function arriereCotis(m) { let s = 0; for (const mois of moisActifs(m)) { if (idx(mois) > idx(AUJ.mois)) continue; s += Math.max(0, montantPour("cotisation", mois) - settledCotis(m.matricule, mois)); } return s; }
+  function penaliteDue(m) { return penalitesDuMatricule(m.matricule).reduce((s, p) => s + p.reste, 0); }
+  function avanceAccordee(m) { let s = 0; for (const e of ledger) { if (e.type !== "paiement" || isAnnule(e.no) || e.matricule !== m.matricule) continue; for (const a of e.affectations || []) if (a.kind === "avance") s += a.montant; } return s; }
+  /* RG-F3 : les deux écritures restent au journal et se compensent — la trésorerie
+     somme tous les flux : l'origine compte toujours, l'inverse l'annule (effet net nul). */
+  function tresorerie() { return ledger.reduce((s, e) => s + (e.flux || 0), 0); }
+  function detteDepense(no_dep) { const d = valid().find(e => e.no === no_dep && e.type === "depense" && e.statut === "a_payer"); if (!d) return 0; const regles = valid().filter(e => e.type === "reglement_dette" && e.cible === no_dep).reduce((s, e) => s + e.montant, 0); return d.montant - regles; }
+
+  const resp = (status, code, msg, data, auditId) => ({ status, code, msg, data: data ?? null, auditId: auditId ?? null });
+  function openSession(u) { const t = rand(32); sessions.set(t, { userId: u.id, exp: now() + SESSION_TTL }); return t; }
+  const userDTO = u => ({ id: u.id, user: u.user, nom: u.nom, role: u.role, roleLabel: R[u.role], statut: u.statut, matricule: u.matricule });
+  async function guard(req, def) {
+    if (!def) { const a = await audit("ENDPOINT_INEXISTANT", req.actorLabel || "inconnu", "—", (req.endpoint || "?") + " — requête rejetée : aucune opération n'est jamais modifiée ni supprimée (RG-F3)", "BLOCAGE"); return resp(404, "ENDPOINT_INEXISTANT", "Cette action n'existe pas sur le serveur — une opération financière ne peut jamais être modifiée ni supprimée (RG-F3).", null, a); }
+    if (def.public) return null;
+    const s = req.token && sessions.get(req.token);
+    if (!req.token || !s) { const a = await audit("SESSION_REQUISE", req.actorLabel || "anonyme", "—", req.endpoint + " sans session valide" + (req.token ? " (jeton inconnu ou révoqué)" : ""), "BLOCAGE"); return resp(401, "AUTH_REQUISE", "Vous devez être connecté pour cette action." + (req.token ? " Jeton inconnu du serveur — l'essai a été enregistré." : ""), null, a); }
+    if (s.exp <= now()) { sessions.delete(req.token); return resp(401, "SESSION_EXPIREE", "Votre session a expiré (8 heures). Reconnectez-vous.", null, await audit("SESSION_EXPIREE", "?", "—", req.endpoint, "BLOCAGE")); }
+    const u = users.find(x => x.id === s.userId);
+    if (!u || u.statut !== "actif") { sessions.delete(req.token); return resp(401, "COMPTE_DESACTIVE", "Ce compte est désactivé.", null, await audit("COMPTE_REFUSE", u ? u.user : "?", "—", req.endpoint, "BLOCAGE")); }
+    if (def.perm && !PERMS[def.perm]?.includes(u.role)) { const a = await audit("TENTATIVE_NON_AUTORISEE", u.user, R[u.role], req.endpoint + " exige « " + (def.perm || "—") + " » — rôle « " + R[u.role] + " » refusé", "ALERTE"); return resp(403, "ACCES_REFUSE", "Votre rôle (« " + R[u.role] + " ») n'autorise pas cette action : la saisie des opérations financières est réservée au trésorier (RG-F1, décision D6). Le refus est journalisé.", null, a); }
+    req.user = u;
+    return null;
+  }
+
+  const TS_OK = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
+  const MOIS_OK = s => /^\d{4}-\d{2}$/.test(String(s || ""));
+
+  /* ── Endpoints ── */
+  const EP = {};
+  EP["auth.login"] = { public: true, async h(req) {
+    const { user, pass } = req.body || {};
+    const u = users.find(x => x.user === user);
+    if (!u) return resp(401, "IDENTIFIANT_INVALIDE", "Identifiant ou mot de passe incorrect.", null, await audit("CONNEXION_ECHEC", String(user || "?"), "—", "identifiant inconnu", "ALERTE"));
+    const h = await pbkdf2(pass || "", u.salt);
+    if (h !== u.hash) return resp(401, "IDENTIFIANT_INVALIDE", "Identifiant ou mot de passe incorrect.", null, await audit("CONNEXION_ECHEC", u.user, R[u.role], "mot de passe incorrect", "ALERTE"));
+    const t = openSession(u);
+    return resp(200, "OK", "Bienvenue " + u.nom + " — session ouverte pour 8 heures.", { token: t, user: userDTO(u), perms: Object.keys(PERMS).filter(p => PERMS[p].includes(u.role)) }, await audit("CONNEXION", u.user, R[u.role], "session ouverte pour 8 h"));
+  } };
+  EP["auth.logout"] = { perm: "auth.self", async h(req) { sessions.delete(req.token); return resp(200, "OK", "Session fermée.", null, await audit("DECONNEXION", req.user.user, R[req.user.role], "session fermée")); } };
+
+  EP["members.list"] = { perm: "members.view_all", async h(req) {
+    const q = norm((req.body || {}).q);
+    let out = members.slice();
+    if (q) out = out.filter(m => norm(m.nom + " " + m.prenom).includes(q) || m.matricule.toLowerCase().includes(q));
+    out.sort((a, b) => (a.nom + a.prenom).localeCompare(b.nom + b.prenom, "fr"));
+    return resp(200, "OK", out.length + " fiche(s).", out.map(mDTO));
+  } };
+
+  /* Prévisualisation RG-F2/C3 : aucun effet de bord, aucune écriture */
+  EP["finance.preview"] = { perm: "finance.create", async h(req) {
+    const b = req.body || {};
+    const m = findMatricule(b.matricule);
+    if (!m) return resp(404, "MATRICULE_INCONNU", "Aucune fiche ne porte ce matricule.", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], "matricule inconnu " + b.matricule, "ALERTE"));
+    const montant = Number(b.montant);
+    if (!Number.isInteger(montant) || montant <= 0) return resp(422, "MONTANT_INVALIDE", "Montant invalide : entier strictement positif attendu.", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], m.matricule + " montant " + b.montant, "ALERTE"));
+    const af = computeAffectation(montant, m.matricule);
+    if (af.reste > 0) return resp(422, "SANS_DESTINATION", "Montant refusé : après imputation de toutes les échéances disponibles, un surplus de " + af.reste.toLocaleString("fr-FR") + " " + DEVISE + " n'a aucune destination (plafond d'avance atteint ou membre inactif).", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], m.matricule + " surplus sans destination", "ALERTE"));
+    return resp(200, "OK", "Imputation proposée (RG-C3) — aucune écriture créée tant que l'opération n'est pas confirmée.", { matricule: m.matricule, nom: m.nom + " " + m.prenom, montant, items: af.items, reste: af.reste });
+  } };
+
+  /* Encaissement : imputation figée à la confirmation (RG-C3), reçu unique anti-doublon */
+  EP["finance.pay"] = { perm: "finance.create", async h(req) {
+    const b = req.body || {};
+    const m = findMatricule(b.matricule);
+    if (!m) return resp(404, "MATRICULE_INCONNU", "Aucune fiche ne porte ce matricule : l'encaissement suit le registre.", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], "matricule inconnu " + b.matricule, "ALERTE"));
+    const montant = Number(b.montant);
+    if (!Number.isInteger(montant) || montant <= 0) return resp(422, "MONTANT_INVALIDE", "Montant invalide : entier strictement positif attendu (valeur reçue : " + String(b.montant) + ").", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], m.matricule + " montant " + String(b.montant), "ALERTE"));
+    if (!MODES.includes(b.mode)) return resp(422, "MODE_INCONNU", "Mode de paiement inconnu : Espèces ou Mobile Money.", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], String(b.mode), "ALERTE"));
+    const ref = String(b.ref || "").trim();
+    if (!ref) return resp(422, "REF_REQUISE", "La référence du reçu est obligatoire : elle permet d'empêcher les doubles enregistrements.", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], m.matricule + " sans référence de reçu", "ALERTE"));
+    if (refsUtilisees().has(ref.toLowerCase())) return resp(409, "REF_DEJA_UTILISEE", "Double enregistrement refusé : la référence de reçu « " + ref + " » existe déjà au journal. Vérifiez l'opération d'origine avant de re-saisir.", null, await audit("DOUBLE_ENREGISTREMENT", req.user.user, R[req.user.role], "référence " + ref + " déjà utilisée", "ALERTE"));
+    if (!TS_OK(b.date) || String(b.date) > AUJ.date) return resp(422, "DATE_INVALIDE", "Date d'encaissement invalide ou future (aujourd'hui : " + AUJ.date + ").", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], "date " + b.date, "ALERTE"));
+    ensurePenalites();
+    const af = computeAffectation(montant, m.matricule);
+    if (af.reste > 0) return resp(422, "SANS_DESTINATION", "Montant refusé : un surplus de " + af.reste.toLocaleString("fr-FR") + " " + DEVISE + " n'a aucune destination après imputation (plafond d'avance atteint ou membre inactif).", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], m.matricule + " surplus sans destination", "ALERTE"));
+    const e = { no: ledger.length + 1, ts: iso(), actor: req.user.user, type: "paiement", date: String(b.date), matricule: m.matricule, montant, mode: b.mode, ref, affectations: af.items, flux: montant, motif: null };
+    ledger.push(e);
+    return resp(200, "OK", "Paiement n° " + e.no + " enregistré : " + montant.toLocaleString("fr-FR") + " " + DEVISE + " (" + b.mode + ", reçu " + ref + ") imputé selon RG-C3 : " + af.items.map(a => a.kind === "penalite" ? "pénalité du mois " + a.mois : (a.kind === "avance" ? "avance " : "cotisation ") + a.mois + " — " + a.montant.toLocaleString("fr-FR")).join(" ; ") + ".", { ...e }, await audit("ENCAISSEMENT", req.user.user, R[req.user.role], m.matricule + " — " + montant.toLocaleString("fr-FR") + " " + DEVISE + " — " + b.mode + " — reçu " + ref + " — imputation : " + af.items.map(a => (a.kind === "penalite" ? "pénalité " + a.mois : (a.kind === "avance" ? "avance " : a.mois)) + " " + a.montant).join(", ")));
+  } };
+
+  /* Dépense RG-F4 : date, catégorie, montant, libellé, justificatif facultatif */
+  EP["finance.depense"] = { perm: "finance.create", async h(req) {
+    const b = req.body || {};
+    const montant = Number(b.montant);
+    if (!Number.isInteger(montant) || montant <= 0) return resp(422, "MONTANT_INVALIDE", "Montant invalide : entier strictement positif attendu.", null, await audit("DEPENSE_REJETEE", req.user.user, R[req.user.role], "montant " + String(b.montant), "ALERTE"));
+    if (!TS_OK(b.date)) return resp(422, "DATE_INVALIDE", "La date de l'opération est obligatoire (RG-F4).", null, await audit("DEPENSE_REJETEE", req.user.user, R[req.user.role], "date absente", "ALERTE"));
+    if (String(b.date) > AUJ.date) return resp(422, "DATE_INVALIDE", "Date future refusée (aujourd'hui : " + AUJ.date + ") : une dépense se saisit à son opération réelle.", null, await audit("DEPENSE_REJETEE", req.user.user, R[req.user.role], "date future " + b.date, "ALERTE"));
+    if (!CATEGORIES.includes(b.categorie)) return resp(422, "CATEGORIE_INCONNUE", "Catégorie inconnue : " + CATEGORIES.join(", ") + ".", null, await audit("DEPENSE_REJETEE", req.user.user, R[req.user.role], String(b.categorie), "ALERTE"));
+    const lib = String(b.libelle || "").trim();
+    if (lib.length < 3) return resp(422, "LIBELLE_REQUIS", "Le libellé est obligatoire (RG-F4).", null, await audit("DEPENSE_REJETEE", req.user.user, R[req.user.role], "libellé absent", "ALERTE"));
+    const statut = b.statut === "a_payer" ? "a_payer" : "payee";
+    const just = String(b.justificatif || "").trim().slice(0, 60);
+    if (just && justUtilises().has(just.toLowerCase())) return resp(409, "JUSTIFICATIF_DEJA_UTILISE", "Double enregistrement suspecté : ce justificatif est déjà référencé par une autre opération.", null, await audit("DEPENSE_REJETEE", req.user.user, R[req.user.role], "justificatif " + just + " déjà référencé", "ALERTE"));
+    const e = { no: ledger.length + 1, ts: iso(), actor: req.user.user, type: "depense", date: String(b.date), montant, categorie: b.categorie, libelle: lib, justificatif: just || null, statut, mode: MODES.includes(b.mode) ? b.mode : "Espèces", ref: null, matricule: null, flux: statut === "payee" ? -montant : 0, motif: null };
+    ledger.push(e);
+    return resp(200, "OK", "Dépense n° " + e.no + " enregistrée : " + lib + " — " + montant.toLocaleString("fr-FR") + " " + DEVISE + " (" + b.categorie + ", " + (statut === "payee" ? "payée : sortie de trésorerie" : "à payer : dette, aucun flux tant que non réglée") + ").", { ...e }, await audit("DEPENSE", req.user.user, R[req.user.role], lib + " — " + montant.toLocaleString("fr-FR") + " " + DEVISE + " — " + b.categorie + " — " + (statut === "payee" ? "payée" : "à payer") + (just ? " — justificatif " + just : "")));
+  } };
+
+  EP["finance.recette"] = { perm: "finance.create", async h(req) {
+    const b = req.body || {};
+    const montant = Number(b.montant);
+    if (!Number.isInteger(montant) || montant <= 0) return resp(422, "MONTANT_INVALIDE", "Montant invalide : entier strictement positif attendu.", null, await audit("RECETTE_REJETEE", req.user.user, R[req.user.role], "montant " + String(b.montant), "ALERTE"));
+    if (!TS_OK(b.date)) return resp(422, "DATE_INVALIDE", "La date de l'opération est obligatoire (RG-F4).", null, await audit("RECETTE_REJETEE", req.user.user, R[req.user.role], "date absente", "ALERTE"));
+    if (String(b.date) > AUJ.date) return resp(422, "DATE_INVALIDE", "Date future refusée (aujourd'hui : " + AUJ.date + ").", null, await audit("RECETTE_REJETEE", req.user.user, R[req.user.role], "date future " + b.date, "ALERTE"));
+    if (!MODES.includes(b.mode)) return resp(422, "MODE_INCONNU", "Mode inconnu : Espèces ou Mobile Money.", null, await audit("RECETTE_REJETEE", req.user.user, R[req.user.role], String(b.mode), "ALERTE"));
+    const src = String(b.source || "").trim();
+    if (src.length < 3) return resp(422, "SOURCE_REQUISE", "La source de la recette est obligatoire (don, subvention…).", null, await audit("RECETTE_REJETEE", req.user.user, R[req.user.role], "source absente", "ALERTE"));
+    const ref = String(b.ref || "").trim();
+    if (!ref) return resp(422, "REF_REQUISE", "La référence du reçu est obligatoire : elle empêche les doubles enregistrements.", null, await audit("RECETTE_REJETEE", req.user.user, R[req.user.role], "sans référence", "ALERTE"));
+    if (refsUtilisees().has(ref.toLowerCase())) return resp(409, "REF_DEJA_UTILISEE", "Double enregistrement refusé : cette référence existe déjà au journal.", null, await audit("DOUBLE_ENREGISTREMENT", req.user.user, R[req.user.role], "référence " + ref + " déjà utilisée", "ALERTE"));
+    const e = { no: ledger.length + 1, ts: iso(), actor: req.user.user, type: "recette", date: String(b.date), montant, mode: b.mode, ref, source: src, flux: montant, matricule: null, motif: null };
+    ledger.push(e);
+    return resp(200, "OK", "Recette n° " + e.no + " enregistrée : " + src + " — " + montant.toLocaleString("fr-FR") + " " + DEVISE + " (" + b.mode + ").", { ...e }, await audit("RECETTE", req.user.user, R[req.user.role], src + " — " + montant.toLocaleString("fr-FR") + " " + DEVISE + " — " + b.mode + " — reçu " + ref));
+  } };
+
+  /* Règlement d'une dette : opération financière liée (RG-D2) */
+  EP["finance.regler_dette"] = { perm: "finance.create", async h(req) {
+    const b = req.body || {};
+    const dep = valid().find(e => e.no === Number(b.cible) && e.type === "depense");
+    if (!dep) return resp(404, "DEPENSE_INCONNUE", "Aucune dépense ne porte ce numéro.", null, await audit("REGLEMENT_REJETE", req.user.user, R[req.user.role], "cible " + b.cible, "ALERTE"));
+    if (dep.statut !== "a_payer") return resp(422, "DEJA_PAYEE", "Cette dépense est déjà payée : sa sortie de trésorerie a déjà été enregistrée.", null, await audit("REGLEMENT_REJETE", req.user.user, R[req.user.role], "dépense n° " + dep.no + " déjà payée", "ALERTE"));
+    const montant = Number(b.montant);
+    if (!Number.isInteger(montant) || montant <= 0) return resp(422, "MONTANT_INVALIDE", "Montant invalide.", null, await audit("REGLEMENT_REJETE", req.user.user, R[req.user.role], "montant " + String(b.montant), "ALERTE"));
+    const restant = detteDepense(dep.no);
+    if (montant > restant) return resp(422, "REGLEMENT_EXCESSIF", "Règlement refusé : la dette restante de cette dépense est de " + restant.toLocaleString("fr-FR") + " " + DEVISE + ".", null, await audit("REGLEMENT_REJETE", req.user.user, R[req.user.role], "montant " + montant.toLocaleString("fr-FR") + " > reste " + restant.toLocaleString("fr-FR"), "ALERTE"));
+    if (!MODES.includes(b.mode)) return resp(422, "MODE_INCONNU", "Mode inconnu.", null, await audit("REGLEMENT_REJETE", req.user.user, R[req.user.role], String(b.mode), "ALERTE"));
+    const ref = String(b.ref || "").trim();
+    if (!ref) return resp(422, "REF_REQUISE", "La référence du règlement est obligatoire.", null, await audit("REGLEMENT_REJETE", req.user.user, R[req.user.role], "sans référence", "ALERTE"));
+    if (refsUtilisees().has(ref.toLowerCase())) return resp(409, "REF_DEJA_UTILISEE", "Double enregistrement refusé : cette référence existe déjà.", null, await audit("DOUBLE_ENREGISTREMENT", req.user.user, R[req.user.role], "référence " + ref, "ALERTE"));
+    if (!TS_OK(b.date) || String(b.date) > AUJ.date) return resp(422, "DATE_INVALIDE", "Date de règlement invalide ou future.", null, await audit("REGLEMENT_REJETE", req.user.user, R[req.user.role], "date " + b.date, "ALERTE"));
+    const e = { no: ledger.length + 1, ts: iso(), actor: req.user.user, type: "reglement_dette", date: String(b.date), cible: dep.no, montant, mode: b.mode, ref, libelle: "Règlement dette : " + dep.libelle, flux: -montant, matricule: null, motif: null };
+    ledger.push(e);
+    return resp(200, "OK", "Règlement n° " + e.no + " enregistré (RG-D2) : " + montant.toLocaleString("fr-FR") + " " + DEVISE + " pour « " + dep.libelle + " » — dette restante : " + (restant - montant).toLocaleString("fr-FR") + " " + DEVISE + ".", { ...e }, await audit("REGLEMENT_DETTES", req.user.user, R[req.user.role], "dépense n° " + dep.no + " (« " + dep.libelle + " ») — " + montant.toLocaleString("fr-FR") + " " + DEVISE + " — " + b.mode + " — réf " + ref));
+  } };
+
+  /* Contre-passation RG-F3 : écriture inverse référencée, origine conservée ;
+     contre-passation d'un constat de pénalité = remise RG-P3 (décision du bureau tracée) */
+  EP["finance.contrepasser"] = { perm: "finance.create", async h(req) {
+    const b = req.body || {};
+    const e = ledger.find(x => x.no === Number(b.no));
+    if (!e) return resp(404, "ECRITURE_INCONNUE", "Aucune écriture ne porte ce numéro.", null, await audit("CONTREPASSATION_REJETEE", req.user.user, R[req.user.role], "n° " + b.no, "ALERTE"));
+    if (e.type === "contrepassation") return resp(409, "DEJA_CONTREPASSEE", "Cette écriture est déjà une contre-passation.", null, await audit("CONTREPASSATION_REJETEE", req.user.user, R[req.user.role], "n° " + e.no, "ALERTE"));
+    if (isAnnule(e.no)) return resp(409, "DEJA_ANNULEE", "Cette écriture a déjà été annulée : elle reste au journal et ne peut pas être annulée deux fois.", null, await audit("CONTREPASSATION_REJETEE", req.user.user, R[req.user.role], "n° " + e.no + " déjà annulée", "ALERTE"));
+    const motif = String(b.motif || "").trim();
+    if (motif.length < 10) return resp(422, "MOTIF_REQUIS", "Correction refusée : un motif d'au moins 10 caractères est obligatoire (erreur de saisie, mois annulé, décision du bureau…). Toute correction financière doit être autorisée, justifiée et traçable.", null, await audit("CONTREPASSATION_REJETEE", req.user.user, R[req.user.role], "n° " + e.no + " motif insuffisant", "ALERTE"));
+    if (e.type === "penalite" && settledPen(e.no) > 0) return resp(422, "REMISE_IMPOSSIBLE", "Remise refusée : cette pénalité a déjà été réellement encaissée — une restitution tracerait un flux réel, pas une remise.", null, await audit("CONTREPASSATION_REJETEE", req.user.user, R[req.user.role], "n° " + e.no + " déjà réglée", "ALERTE"));
+    if (e.type === "penalite" && !/décision|bureau|assemblée|AG/i.test(motif)) return resp(422, "MOTIF_REMISE_REQUIS", "La remise d'une pénalité (RG-P3) exige la référence d'une décision du bureau ou de l'assemblée dans le motif.", null, await audit("CONTREPASSATION_REJETEE", req.user.user, R[req.user.role], "remise sans référence de décision", "ALERTE"));
+    ensurePenalites();
+    const r = { no: ledger.length + 1, ts: iso(), actor: req.user.user, type: "contrepassation", date: AUJ.date, cible: e.no, montant: e.montant, flux: -(e.flux || 0), matricule: e.matricule || null, ref: null, libelle: e.type === "penalite" ? "Remise de pénalité (RG-P3)" : "Annulation (contre-passation)", motif: motif.slice(0, 200) };
+    ledger.push(r);
+    if (e.type === "penalite") remises.push({ matricule: e.matricule, mois_cible: e.mois_cible, no_constat: e.no, montant: e.montant, motif: motif.slice(0, 160), par: req.user.user });
+    const libelle = e.type === "penalite" ? "Remise de la pénalité n° " + e.no + " (mois " + e.mois_cible + " de " + e.matricule + ")" : "Annulation de l'écriture n° " + e.no;
+    return resp(200, "OK", libelle + " — l'écriture d'origine reste visible au journal (RG-F3).", { ...r }, await audit(e.type === "penalite" ? "REMISE_PENALITE" : "CONTREPASSATION", req.user.user, R[req.user.role], libelle + " — motif : " + motif.slice(0, 120)));
+  } };
+
+  EP["finance.ledger"] = { perm: "finance.view_all", async h(req) {
+    const b = req.body || {};
+    ensurePenalites();
+    let out = ledger.slice(); /* RG-F3 : les écritures annulées restent visibles au journal */
+    if (b.matricule) out = out.filter(e => e.matricule === String(b.matricule).trim());
+    if (b.type) out = out.filter(e => e.type === b.type);
+    if (b.mois) out = out.filter(e => (e.date || "").slice(0, 7) === String(b.mois).trim() || e.mois_cible === String(b.mois).trim());
+    return resp(200, "OK", out.length + " écriture(s) — filtres appliqués par le serveur.", out.map(eDTO));
+  } };
+
+  function eDTO(e) { const d = { no: e.no, ts: e.ts, actor: e.actor, type: e.type, date: e.date || null, flux: e.flux || 0, montant: e.montant || null, matricule: e.matricule || null, ref: e.ref || null, motif: e.motif || null, cible: e.cible || null, mois_cible: e.mois_cible || null, statut: e.statut || null, categorie: e.categorie || null, libelle: e.libelle || null, source: e.source || null, mode: e.mode || null, affectations: e.type === "paiement" ? e.affectations : undefined }; if (d.affectations === undefined) delete d.affectations; return d; }
+
+  EP["finance.state"] = { perm: "finance.view_self", async h(req) {
+    const mat = String((req.body || {}).matricule || "").trim();
+    const m = findMatricule(mat);
+    if (!m) return resp(404, "MATRICULE_INCONNU", "Aucune fiche ne porte le matricule " + mat + ".");
+    const own = req.user.matricule === m.matricule;
+    if (!own && !PERMS["finance.view_all"].includes(req.user.role)) { const a = await audit("TENTATIVE_NON_AUTORISEE", req.user.user, R[req.user.role], "situation de " + m.matricule + " sans droit finance.view_all", "ALERTE"); return resp(403, "ACCES_REFUSE", "Un membre ne consulte que sa propre situation financière.", null, a); }
+    ensurePenalites();
+    const mois = moisActifs(m).map(moi => { const due = montantPour("cotisation", moi); const regle = settledCotis(m.matricule, moi); const cons = constatsDe(m.matricule, moi)[0]; let etat; if (regle >= due) etat = estFutur(moi) ? "avance" : "regle"; else if (regle > 0) etat = "partiel"; else etat = estEnRetard(m, moi) ? "retard" : "du"; return { mois: moi, due, regle, reste: due - regle, etat, penalite: cons && !isAnnule(cons.no) ? cons.montant - settledPen(cons.no) : 0 }; });
+    const pens = penalitesDuMatricule(m.matricule);
+    const entries = ledger.filter(e => e.matricule === m.matricule); /* tout l'historique, annulations comprises */
+    return resp(200, "OK", "Situation de " + m.matricule + " : " + (arriereCotis(m) + penaliteDue(m)) + " " + DEVISE + " de créance.", { matricule: m.matricule, nom: m.nom, prenom: m.prenom, tribu: m.tribu, statut: m.statut, date_adhesion: m.date_adhesion, date_desactivation: m.date_desactivation || null, mois, arriere: arriereCotis(m), penDues: penaliteDue(m), penDetail: pens, avance: avanceAccordee(m), totalPaye: entries.filter(e => e.type === "paiement" && !isAnnule(e.no)).reduce((s, e) => s + e.montant, 0), own });
+  } };
+
+  EP["finance.recoveries"] = { perm: "finance.view_all", async h(req) {
+    ensurePenalites();
+    const rows = members.map(m => { const pen = penaliteDue(m); const ar = arriereCotis(m); return { matricule: m.matricule, nom: m.nom, prenom: m.prenom, tribu: m.tribu, statut_membre: m.statut, enRetard: ar > 0 || pen > 0, arrears: ar, penalites: pen, avance: avanceAccordee(m), totalPaye: valid().filter(e => e.type === "paiement" && e.matricule === m.matricule).reduce((s, e) => s + e.montant, 0) }; }).sort((a, b) => (b.arrears + b.penalites) - (a.arrears + a.penalites) || (a.nom + a.prenom).localeCompare(b.nom + b.prenom, "fr"));
+    const tot = { arrears: rows.reduce((s, r) => s + r.arrears, 0), penalites: rows.reduce((s, r) => s + r.penalites, 0), avances: rows.reduce((s, r) => s + r.avance, 0), enRetard: rows.filter(r => r.enRetard).length, aJour: rows.filter(r => !r.enRetard).length };
+    return resp(200, "OK", tot.enRetard + " membre(s) en retard — créances totales : " + (tot.arrears + tot.penalites).toLocaleString("fr-FR") + " " + DEVISE + ".", { rows, tot });
+  } };
+
+  /* Suivi mensuel, état financier, créances et dettes — recalculables depuis le journal */
+  EP["finance.suivi"] = { perm: "finance.view_all", async h(req) {
+    const annee = Number((req.body || {}).annee) || 2026;
+    ensurePenalites();
+    const rows = [];
+    for (let mm = 1; mm <= 12; mm++) {
+      const mois = annee + "-" + String(mm).padStart(2, "0");
+      if (idx(mois) > idx(AUJ.mois)) { rows.push({ mois, dues: 0, encaissees: 0, attente: 0, taux: 0, penConstatees: 0, flux: 0, futur: true }); continue; }
+      let dues = 0, enc = 0;
+      for (const m of members) { if (!moisActifs(m).includes(mois)) continue; const due = montantPour("cotisation", mois); dues += due; enc += Math.min(due, settledCotis(m.matricule, mois)); }
+      const pen = valid().filter(e => e.type === "penalite" && e.mois_cible === mois).reduce((s, e) => s + e.montant, 0);
+      const flux = valid().filter(e => (e.date || "").slice(0, 7) === mois).reduce((s, e) => s + (e.flux || 0), 0);
+      rows.push({ mois, dues, encaissees: enc, attente: dues - enc, taux: dues ? Math.round(enc / dues * 1000) / 10 : 0, penConstatees: pen, flux, futur: false });
+    }
+    const etat = {
+      cotisDues: rows.reduce((s, r) => s + r.dues, 0),
+      cotisEncaissees: rows.reduce((s, r) => s + r.encaissees, 0),
+      penConstatees: ledger.filter(e => e.type === "penalite" && (e.mois_cible || "").startsWith(String(annee))).reduce((s, e) => s + e.montant, 0),
+      penReglees: valid().filter(e => e.type === "paiement").reduce((s, e) => s + (e.affectations || []).filter(a => a.kind === "penalite" && (a.mois || "").startsWith(String(annee))).reduce((x, a) => x + a.montant, 0), 0),
+      penRemises: valid().filter(e => e.type === "contrepassation").reduce((s, e) => { const c = ledger.find(x => x.no === e.cible); return c && c.type === "penalite" ? s + c.montant : s; }, 0),
+      autresRecettes: valid().filter(e => e.type === "recette" && (e.date || "").startsWith(String(annee))).reduce((s, e) => s + e.montant, 0),
+      depensesCat: {},
+      depensesAPayer: valid().filter(e => e.type === "depense" && e.statut === "a_payer").reduce((s, e) => s + detteDepense(e.no), 0),
+      solde: tresorerie(),
+      creances: members.reduce((s, m) => s + arriereCotis(m) + penaliteDue(m), 0),
+      dettes: members.reduce((s, m) => s + avanceAccordee(m), 0) + valid().filter(e => e.type === "depense" && e.statut === "a_payer").reduce((s, e) => s + detteDepense(e.no), 0)
+    };
+    for (const e of valid().filter(x => x.type === "depense" && x.statut === "payee" && (x.date || "").startsWith(String(annee)))) etat.depensesCat[e.categorie] = (etat.depensesCat[e.categorie] || 0) + e.montant;
+    return resp(200, "OK", "Suivi " + annee + " recalculé depuis le journal — solde de trésorerie : " + etat.solde.toLocaleString("fr-FR") + " " + DEVISE + ".", { annee, rows, etat });
+  } };
+
+  EP["params.get"] = { perm: "finance.view_all", async h(req) { return resp(200, "OK", "Paramètres versionnés (RG-C1 : effet au mois suivant, sans rétroactivité).", { cotisation: params.cotisation, penalite: params.penalite, auj: AUJ }); } };
+  EP["params.set"] = { perm: "params.set", async h(req) {
+    const b = req.body || {};
+    const type = b.type === "cotisation" || b.type === "penalite" ? b.type : null;
+    if (!type) return resp(422, "PARAM_INCONNU", "Paramètre inconnu.", null, await audit("PARAM_REJETE", req.user.user, R[req.user.role], String(b.type), "ALERTE"));
+    const montant = Number(b.montant);
+    if (!Number.isInteger(montant) || montant <= 0) return resp(422, "MONTANT_INVALIDE", "Montant invalide.", null, await audit("PARAM_REJETE", req.user.user, R[req.user.role], "montant " + String(b.montant), "ALERTE"));
+    if (!MOIS_OK(b.depuis)) return resp(422, "MOIS_INVALIDE", "Mois d'effet invalide.", null, await audit("PARAM_REJETE", req.user.user, R[req.user.role], "depuis " + b.depuis, "ALERTE"));
+    if (idx(b.depuis) <= idx(AUJ.mois)) return resp(422, "EFFET_NON_AUTORISE", "RG-C1 : la modification votée prend effet à partir du mois suivant (" + moisDe(idx(AUJ.mois) + 1) + " ou plus) — aucun effet rétroactif.", null, await audit("PARAM_REJETE", req.user.user, R[req.user.role], "effet rétroactif " + b.depuis, "ALERTE"));
+    const motif = String(b.motif || "").trim();
+    if (motif.length < 10) return resp(422, "MOTIF_REQUIS", "La référence de la décision (assemblée, bureau) est obligatoire et tracée.", null, await audit("PARAM_REJETE", req.user.user, R[req.user.role], "motif insuffisant", "ALERTE"));
+    params[type].push({ montant, depuis: String(b.depuis), origine: "Modification tracée : " + motif.slice(0, 100) });
+    return resp(200, "OK", "Nouvelle version enregistrée : " + (type === "cotisation" ? "cotisation mensuelle" : "pénalité mensuelle") + " à " + montant.toLocaleString("fr-FR") + " " + DEVISE + " à partir de " + b.depuis + " (RG-C1 : sans effet rétroactif).", { cotisation: params.cotisation, penalite: params.penalite }, await audit("PARAMETRE_MODIFIE", req.user.user, R[req.user.role], type + " = " + montant.toLocaleString("fr-FR") + " " + DEVISE + " à partir de " + b.depuis + " — " + motif.slice(0, 120)));
+  } };
+
+  EP["audit.list"] = { perm: "audit.view", async h(req) { return resp(200, "OK", auditLog.length + " entrées.", auditLog.map(e => ({ ...e }))); } };
+  EP["audit.verify"] = { perm: "audit.view", async h(req) { const v = await verifyAudit(); return resp(200, "OK", v.integre ? "Chaîne intègre : aucune altération détectée sur " + v.seq + " entrées." : "ALERTE : chaîne compromise à l'entrée n° " + v.seq + " — " + v.motif, { ...v }); } };
+  EP["audit.tamper_demo"] = { perm: "audit.view", async h(req) { if (auditLog.length > 1) { const k = auditLog[Math.min(2, auditLog.length - 1)]; k.detail = k.detail + " [MODIFIÉ PAR UN ATTAQUANT]"; } return resp(200, "OK", "Simulation : une entrée ancienne a été altérée. Relancez la vérification d'intégrité."); } };
+
+  async function api(req) {
+    req.endpoint = req.endpoint || "?";
+    try {
+      const def = EP[req.endpoint];
+      const g = await guard(req, def);
+      if (g) return g;
+      return await def.h(req);
+    } catch (err) {
+      return resp(500, "ERREUR_SERVEUR", "Une erreur interne est survenue — l'action n'a pas été effectuée et a été journalisée.", null, await audit("ERREUR_INTERNE", "système", "—", req.endpoint + " : " + (err && err.message || "?"), "ALERTE"));
+    }
+  }
+
+  /* ── Amorçage : comptes, fiches, journal fictif ── */
+  async function seed() {
+    const defs = [
+      ["s.diallo", "Admin-2026!CI", "admin", "Salif Diallo", "ADLCI-2026-0003"],
+      ["m.kante", "President-2026!", "president", "Mariam Kanté", "ADLCI-2026-0002"],
+      ["a.traore", "Tresor-2026!CI", "tresorier", "Awa Traoré", null],
+      ["f.cisse", "Secretariat-2026!", "secretaire", "Fatoumata Cissé", "ADLCI-2025-0004"],
+      ["n.aka", "Bureau-2026!CI", "bureau", "Nantenin Aka", "ADLCI-2025-0006"],
+      ["k.yao", "Membre-2026!CI", "membre", "Kouassi Yao", "ADLCI-2025-0001"]
+    ];
+    users.length = 0;
+    for (const [user, pass, role, nom, matricule] of defs) {
+      const salt = rand(16);
+      users.push({ id: users.length + 1, user, nom, role, statut: "actif", salt, hash: await pbkdf2(pass, salt), derniere: "—", matricule });
+    }
+    sessions.clear();
+    await auditTail; auditSeq = 0; auditLog = []; auditTail = Promise.resolve();
+    members.length = 0; ledger.length = 0;
+    for (const k of Object.keys(mCounter)) delete mCounter[k];
+    const seedM = [
+      ["Kouassi", "Yao", "Douayêro", "2025-03-08", "actif", null],
+      ["Ibrahima", "Sanogo", "Mariabêh", "2025-03-08", "actif", null],
+      ["Aminata", "Bamba", "Abouyabêh", "2025-04-12", "actif", null],
+      ["Fatoumata", "Cissé", "Aliyabêh", "2025-04-12", "actif", null],
+      ["Adama", "Ouédraogo", "Simbayabêh", "2025-05-03", "inactif", "2026-08-15"],
+      ["Nantenin", "Aka", "Djigayabêh", "2025-05-03", "actif", null],
+      ["Moussa", "Koné", "Douayêro", "2026-02-14", "actif", null],
+      ["Mariam", "Kanté", "Mariabêh", "2026-02-14", "actif", null],
+      ["Salif", "Diallo", "Abouyabêh", "2026-03-21", "actif", null]
+    ];
+    for (const [prenom, nom, tribu, date, statut, desact] of seedM) {
+      members.push({ id: members.length + 1, matricule: nextMatricule(date.slice(0, 4)), nom, prenom, tribu, date_adhesion: date, statut, date_desactivation: desact });
+    }
+    const [KOU, SAN, AMI, FAT, ADA, NAN, MOU, MAR, SAL] = members.map(m => m.matricule);
+    /* Paiements du semis : cotisations réglées avant le 10 de chaque mois, imputées RG-C3.
+       Situations volontairement créées : Sanogo en retard sur 09-11, Adama partiel (400) sur 07
+       et impayé sur 08 (désactivé le 15/08 : obligations arrêtées, dette conservée),
+       Moussa impayé sur le mois courant, Kouassi en avance d'un mois. */
+    const skips = {};
+    skips[SAN] = { "2026-09": 1, "2026-10": 1, "2026-11": 1 };
+    skips[ADA] = { "2026-07": "partiel", "2026-08": 1 };
+    skips[MOU] = { "2026-11": 1 };
+    for (const m of members) {
+      const skip = skips[m.matricule] || {};
+      for (const mois of moisActifs(m)) {
+        if (idx(mois) > idx(AUJ.mois) || skip[mois]) continue;
+        ledger.push({ no: ledger.length + 1, ts: iso(), actor: "a.traore", type: "paiement", date: mois + "-05", matricule: m.matricule, montant: montantPour("cotisation", mois), mode: "Espèces", ref: "REC-" + mois + "-" + String(ledger.length + 1).padStart(3, "0"), affectations: [{ kind: "cotis", mois, montant: montantPour("cotisation", mois) }], flux: montantPour("cotisation", mois), motif: null });
+      }
+    }
+    const af400 = computeAffectation(400, ADA);
+    ledger.push({ no: ledger.length + 1, ts: iso(), actor: "a.traore", type: "paiement", date: "2026-07-06", matricule: ADA, montant: 400, mode: "Espèces", ref: "REC-2026-07-PARTIEL", affectations: af400.items, flux: 400, motif: null });
+    const afKou = computeAffectation(2000, KOU);
+    ledger.push({ no: ledger.length + 1, ts: iso(), actor: "a.traore", type: "paiement", date: "2026-10-28", matricule: KOU, montant: 2000, mode: "Mobile Money", ref: "REC-2026-10-AVANCE", affectations: afKou.items, flux: 2000, motif: null });
+    const seedDeps = [
+      ["2025-04-10", 15000, "Fonctionnement", "Location salle assemblée générale", "FACT-2025-014", "payee", "Espèces"],
+      ["2026-03-15", 25000, "Solidarité", "Don solidarité membre malade", "PV-2026-03-02", "payee", "Espèces"],
+      ["2026-06-20", 5000, "Fonctionnement", "Transport mission Laabha", null, "payee", "Mobile Money"],
+      ["2026-11-05", 8000, "Événements", "Matériel palabres de fin d'année", "DEVIS-2026-042", "a_payer", "Espèces"]
+    ];
+    for (const [date, montant, cat, lib, just, st, mode] of seedDeps) {
+      ledger.push({ no: ledger.length + 1, ts: iso(), actor: "a.traore", type: "depense", date, montant, categorie: cat, libelle: lib, justificatif: just, statut: st, mode, ref: null, matricule: null, flux: st === "payee" ? -montant : 0, motif: null });
+    }
+    ledger.push({ no: ledger.length + 1, ts: iso(), actor: "a.traore", type: "recette", date: "2026-05-12", montant: 50000, mode: "Mobile Money", ref: "DON-2026-001", source: "Don partenaire Laabha", flux: 50000, matricule: null, motif: null });
+    const nPen = ensurePenalites();
+    await audit("SYSTEME_AMORCE", "système", "—", "Journal comptable initialisé : " + ledger.length + " écritures fictives (paiements imputés RG-C3, dépenses RG-F4, don), paramètres D3 (cotisation 1 000, pénalité 500), 9 membres fictifs dont 1 désactivé le 2026-08-15. Constats de pénalité automatiques RG-P1 : " + nPen + " (dette, flux nul).");
+  }
+
+  return { api, seed, R, PERMS, MODES, CATEGORIES, AUJ, DEVISE, stats: () => ({ users: users.length, members: members.length, ledger: ledger.length, audit: auditSeq }) };
+})();
+/* ==================================================================
+   BANC DE TESTS — 24 scénarios avec données fictives. Les calculs du
+   serveur sont confrontés à un RECALCUL INDÉPENDANT refait depuis le
+   journal brut (aucune confiance aveugle dans le serveur).
+   ================================================================== */
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fc = n => Number(n).toLocaleString("fr-FR") + " FCFA";
+let BENCH_RESULTS = [];
+async function login(u, p) { return await SERVER.api({ endpoint: "auth.login", body: { user: u, pass: p } }); }
+async function call(endpoint, token, body) { return await SERVER.api({ endpoint, token, body }); }
+const idxB = ym => { const [y, m] = String(ym).split("-").map(Number); return y * 12 + (m - 1); };
+const moisDeB = i => Math.floor(i / 12) + "-" + String(i % 12 + 1).padStart(2, "0");
+
+/* Recalcul indépendant : rejoue les règles depuis le journal brut exposé */
+async function recalc(t) {
+  const lg = (await call("finance.ledger", t, {})).data;
+  const mem = (await call("members.list", t, {})).data;
+  const isAnn = no => lg.some(e => e.type === "contrepassation" && e.cible === no);
+  const val = lg.filter(e => !isAnn(e.no));
+  const MONT = 1000;
+  const moisActifs = m => { const a = idxB(m.date_adhesion.slice(0, 7)); const f = m.date_desactivation ? idxB(m.date_desactivation.slice(0, 7)) : idxB(SERVER.AUJ.mois); const o = []; for (let i = a; i <= f; i++) o.push(moisDeB(i)); return o; };
+  const settledC = (mat, mois) => val.filter(e => e.type === "paiement" && e.matricule === mat).reduce((s, e) => s + (e.affectations || []).filter(a => (a.kind === "cotis" || a.kind === "avance") && a.mois === mois).reduce((x, a) => x + a.montant, 0), 0);
+  const settledP = no => val.filter(e => e.type === "paiement").reduce((s, e) => s + (e.affectations || []).filter(a => a.kind === "penalite" && a.no_penalite === no).reduce((x, a) => x + a.montant, 0), 0);
+  const arrear = mat => { const m = mem.find(x => x.matricule === mat); return moisActifs(m).filter(mo => idxB(mo) <= idxB(SERVER.AUJ.mois)).reduce((s, mo) => s + Math.max(0, MONT - settledC(mat, mo)), 0); };
+  const penDue = mat => val.filter(e => e.type === "penalite" && e.matricule === mat).reduce((s, p) => s + Math.max(0, p.montant - settledP(p.no)), 0);
+  const avances = mem.reduce((s, m) => s + val.filter(e => e.type === "paiement" && e.matricule === m.matricule).reduce((x, e) => x + (e.affectations || []).filter(a => a.kind === "avance").reduce((y, a) => y + a.montant, 0), 0), 0);
+  const detteAP = val.filter(e => e.type === "depense" && e.statut === "a_payer").reduce((s, e) => s + (e.montant - val.filter(x => x.type === "reglement_dette" && x.cible === e.no).reduce((x, y) => x + y.montant, 0)), 0);
+  const solde = lg.reduce((s, e) => s + (e.flux || 0), 0); /* les paires origine + inverse se compensent (RG-F3) */
+  const fluxPen = val.filter(e => e.type === "penalite").reduce((s, e) => s + (e.flux || 0), 0);
+  return { solde, creances: mem.reduce((s, m) => s + arrear(m.matricule) + penDue(m.matricule), 0), dettes: avances + detteAP, arrears: mem.reduce((s, m) => s + arrear(m.matricule), 0), penalites: mem.reduce((s, m) => s + penDue(m.matricule), 0), avances, fluxPen, lg, val, mem };
+}
+async function recup(t) { const r = await call("finance.recoveries", t); return r.data; }
+async function soldeServeur(t) { const r = await call("finance.suivi", t, { annee: 2026 }); return r.data.etat.solde; }
+const moisRetardState = st => st.mois.filter(x => x.etat === "retard" || x.etat === "partiel").map(x => x.mois);
+
+const BENCH = [
+  /* ── G1 · Identification : à jour, en retard, arriérés, pénalités ── */
+  { id: "T1", g: 1, titre: "Identifier les membres en retard et à jour", attendu: "en retard : Sanogo, Ouédraogo (inactif, dette conservée), Koné ; à jour : les six autres",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const d = await recup(t); const ret = d.rows.filter(r => r.enRetard).map(r => r.matricule).sort(); const aj = d.rows.filter(r => !r.enRetard); const ada = d.rows.find(r => r.matricule === "ADLCI-2025-0005"); return { obtenu: ret.join(", ") + " en retard ; " + aj.length + " à jour", pass: ret.length === 3 && ret.includes("ADLCI-2025-0002") && ret.includes("ADLCI-2025-0005") && ret.includes("ADLCI-2026-0001") && aj.length === 6 && ada && ada.statut_membre === "inactif", detail: "Le membre inactif garde ses dettes : les obligations déjà enregistrées ne s'effacent pas (module membres)." } } },
+  { id: "T2", g: 1, titre: "Calcul des arriérés par membre et au total", attendu: "Sanogo 3 000 (mois 2026-09, 10, 11) ; Ouédraogo 1 600 (07 partiel 400, 08 impayé) ; Koné 1 000 ; total 5 600 — recalcul indépendant identique",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const d = await recup(t); const s = await call("finance.state", t, { matricule: "ADLCI-2025-0002" }); const san = d.rows.find(r => r.matricule === "ADLCI-2025-0002"); const ada = d.rows.find(r => r.matricule === "ADLCI-2025-0005"); const mou = d.rows.find(r => r.matricule === "ADLCI-2026-0001"); const rc = await recalc(t); return { obtenu: "Sanogo " + fc(san.arrears) + " [" + moisRetardState(s.data).join(", ") + "] ; Ouédraogo " + fc(ada.arrears) + " ; Koné " + fc(mou.arrears) + " ; total " + fc(d.tot.arrears) + " ; recalcul : " + fc(rc.arrears), pass: san.arrears === 3000 && ada.arrears === 1600 && mou.arrears === 1000 && d.tot.arrears === 5600 && rc.arrears === 5600 && moisRetardState(s.data).join() === "2026-09,2026-10,2026-11", detail: "RG-C1 : 1 000 par mois actif ; le mois partiellement réglé reste dû à hauteur du manquant." } } },
+  { id: "T3", g: 1, titre: "Pénalités applicables : dette calculée, jamais une recette", attendu: "6 constats × 500 = 3 000 FCFA de pénalités dues ; flux trésorerie des constats nul ; solde inchangé par la pénalité",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const d = await recup(t); const rc = await recalc(t); const san = d.rows.find(r => r.matricule === "ADLCI-2025-0002"); const ada = d.rows.find(r => r.matricule === "ADLCI-2025-0005"); const mou = d.rows.find(r => r.matricule === "ADLCI-2026-0001"); return { obtenu: "Sanogo " + fc(san.penalites) + ", Ouédraogo " + fc(ada.penalites) + ", Koné " + fc(mou.penalites) + " ; total " + fc(d.tot.penalites) + " ; flux des constats : " + rc.fluxPen + " ; solde : " + fc(rc.solde), pass: san.penalites === 1500 && ada.penalites === 1000 && mou.penalites === 500 && d.tot.penalites === 3000 && rc.fluxPen === 0, detail: "Règle du bureau : une pénalité calculée n'est pas une recette encaissée — RG-P1 les constate comme dettes (flux nul) ; elles n'entreront en trésorerie qu'une fois réellement réglées." } } },
+  { id: "T4", g: 1, titre: "Prévisualisation de l'imputation RG-C3 avant confirmation (RG-F2)", attendu: "2 000 FCFA pour Sanogo → cotisation 2026-09, puis SA pénalité 09, puis cotisation 10 ; 700 → partiel sur 09 ; aucune écriture créée",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const avant = (await call("finance.ledger", t, {})).data.length; const p1 = await call("finance.preview", t, { matricule: "ADLCI-2025-0002", montant: 2000 }); const p2 = await call("finance.preview", t, { matricule: "ADLCI-2025-0002", montant: 700 }); const apres = (await call("finance.ledger", t, {})).data.length; const sig = p1.data.items.map(a => (a.kind === "cotis" ? "C " : "P ") + a.mois + " " + a.montant).join(" ; "); return { obtenu: "2 000 → " + sig + " ; 700 → " + p2.data.items[0].mois + " " + fc(p2.data.items[0].montant) + " ; écritures avant/après : " + avant + "/" + apres, pass: p1.status === 200 && sig === "C 2026-09 1000 ; P 2026-09 500 ; C 2026-10 500" && p2.data.items.length === 1 && p2.data.items[0].montant === 700 && avant === apres, detail: "RG-C3 : cotisation du mois ancien, PUIS sa pénalité, puis mois suivant — affiché avant confirmation, aucun effet de bord." } } },
+  { id: "T5", g: 1, titre: "Le membre ordinaire ne consulte que sa situation", attendu: "sa situation → 200 (à jour, avance visible) ; celle d'un autre → 403",
+    async fn() { const tm = (await login("k.yao", "Membre-2026!CI")).data.token; const r1 = await call("finance.state", tm, { matricule: "ADLCI-2025-0001" }); const r2 = await call("finance.state", tm, { matricule: "ADLCI-2025-0002" }); return { obtenu: "sienne : " + r1.status + " (arriérés " + r1.data.arriere + ", avance " + fc(r1.data.avance) + ") ; autre : " + r2.status, pass: r1.status === 200 && r1.data.own === true && r1.data.arriere === 0 && r2.status === 403, detail: r2.msg } } },
+
+  /* ── G2 · Encaissements : complet, partiel, avance, pénalités, anti-doublon ── */
+  { id: "T6", g: 2, titre: "Paiement complet imputé RG-C3", attendu: "2 000 → cotisation 09 (1 000), pénalité 09 (500), cotisation 10 (500) ; arriérés restants 1 500 ; trésorerie +2 000",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const av = await soldeServeur(t); const r = await call("finance.pay", t, { matricule: "ADLCI-2025-0002", montant: 2000, mode: "Espèces", ref: "REC-2026-11-100", date: "2026-11-19" }); const st = (await call("finance.state", t, { matricule: "ADLCI-2025-0002" })).data; const rc = await recalc(t); return { obtenu: r.msg.slice(0, 150) + " — arriérés restants : " + fc(st.arriere) + ", pénalités dues : " + fc(st.penDues) + " ; trésorerie " + (rc.solde - av) + " FCFA d'écart", pass: r.status === 200 && st.arriere === 1500 && st.penDues === 1000 && rc.solde - av === 2000 && rc.solde === (await soldeServeur(t)), detail: "L'ordre RG-C3 règle d'abord la cotisation 09, puis SA pénalité, puis la cotisation 10." } } },
+  { id: "T7", g: 2, titre: "Paiement partiel pris en compte", attendu: "600 complètent le mois 07 d'Ouédraogo (400 déjà réglés) → mois réglé ; RG-P2 : la pénalité déjà constatée reste due",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r = await call("finance.pay", t, { matricule: "ADLCI-2025-0005", montant: 600, mode: "Espèces", ref: "REC-2026-11-101", date: "2026-11-19" }); const st = (await call("finance.state", t, { matricule: "ADLCI-2025-0005" })).data; const m07 = st.mois.find(x => x.mois === "2026-07"); const pen07 = st.penDetail.find(x => x.mois_cible === "2026-07"); return { obtenu: r.status + " — mois 07 : réglé " + m07.regle + "/" + m07.due + " (" + m07.etat + ") ; arriérés restants " + fc(st.arriere) + " ; pénalité 07 : " + pen07.reste + " FCFA restants", pass: r.status === 200 && m07.regle === 1000 && m07.etat === "regle" && st.arriere === 1000 && pen07.reste === 500, detail: "RG-P2 : la pénalité cesse de courir dès le règlement — celle déjà constatée pour 07 reste due ; la remise éventuelle passe par RG-P3." } } },
+  { id: "T8", g: 2, titre: "Avance affectée aux périodes futures concernées", attendu: "1 000 de Yao → avance sur 2027-02 uniquement ; aucun effet sur le passé ; avance accordée 3 000 (dette de l'association)",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r = await call("finance.pay", t, { matricule: "ADLCI-2025-0001", montant: 1000, mode: "Mobile Money", ref: "REC-2026-11-AVANCE", date: "2026-11-19" }); const st = (await call("finance.state", t, { matricule: "ADLCI-2025-0001" })).data; const pas = r.data.affectations.filter(a => a.kind === "avance"); const impactPasse = r.data.affectations.filter(a => a.mois <= SERVER.AUJ.mois); return { obtenu: r.msg.slice(0, 90) + " — avance totale : " + fc(st.avance) + " ; écritures sur le passé : " + impactPasse.length, pass: r.status === 200 && pas.length === 1 && pas[0].mois === "2027-02" && impactPasse.length === 0 && st.avance === 3000 && st.arriere === 0, detail: "L'avance est comptée comme dette de l'association envers le membre (RG-D1 « avance accordée »)." } } },
+  { id: "T9", g: 2, titre: "Encaissement des pénalités après règlement des cotisations", attendu: "1 000 → solde cotisation 10 (500) + pénalité 10 (500) ; puis 1 500 → cotisation 11 (1 000) + pénalité 11 (500) ; Sanogo à jour, dette pénalités 0",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r1 = await call("finance.pay", t, { matricule: "ADLCI-2025-0002", montant: 1000, mode: "Espèces", ref: "REC-2026-11-102", date: "2026-11-19" }); const r2 = await call("finance.pay", t, { matricule: "ADLCI-2025-0002", montant: 1500, mode: "Mobile Money", ref: "REC-2026-11-103", date: "2026-11-19" }); const st = (await call("finance.state", t, { matricule: "ADLCI-2025-0002" })).data; const d = await recup(t); const san = d.rows.find(r => r.matricule === "ADLCI-2025-0002"); return { obtenu: "1er : " + r1.data.affectations.map(a => (a.kind === "penalite" ? "P " : "C ") + a.mois + " " + a.montant).join(" ; ") + " ; 2e : " + r2.data.affectations.map(a => (a.kind === "penalite" ? "P " : "C ") + a.mois + " " + a.montant).join(" ; ") + " — arriérés " + st.arriere + ", pénalités " + st.penDues + ", " + (san.enRetard ? "en retard" : "à jour"), pass: r1.status === 200 && r2.status === 200 && st.arriere === 0 && st.penDues === 0 && san.enRetard === false, detail: "RG-C3 strict : cotisation du mois puis sa pénalité, puis mois suivant — les pénalités réglées deviennent des recettes encaissées." } } },
+  { id: "T10", g: 2, titre: "Doubles enregistrements et saisies invalides refusés", attendu: "référence de reçu dupliquée → 409 ; référence absente → 422 ; montants −5, 0 et 500,5 → 422",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r1 = await call("finance.pay", t, { matricule: "ADLCI-2025-0001", montant: 1000, mode: "Espèces", ref: "REC-2026-11-100", date: "2026-11-19" }); const r2 = await call("finance.pay", t, { matricule: "ADLCI-2025-0001", montant: 1000, mode: "Espèces", ref: "", date: "2026-11-19" }); const rs = []; for (const v of [-5, 0, 500.5]) rs.push((await call("finance.pay", t, { matricule: "ADLCI-2025-0001", montant: v, mode: "Espèces", ref: "REC-X" + v, date: "2026-11-19" })).status); return { obtenu: "dupliquée " + r1.status + " (" + r1.code + ") ; vide " + r2.status + " ; montants " + rs.join(" / "), pass: r1.status === 409 && r1.code === "REF_DEJA_UTILISEE" && r2.status === 422 && rs.every(s => s === 422), detail: "La référence de reçu unique est la protection contre le double enregistrement (proposition V3 soumise à validation)." } } },
+
+  /* ── G3 · Recettes, dépenses, dettes et trésorerie ── */
+  { id: "T11", g: 3, titre: "Enregistrer une recette et une dépense (RG-F4)", attendu: "dépense complète (date, catégorie, montant, libellé, justificatif) → 200, trésorerie −3 000 ; recette autre → 200, +10 000 ; référence dupliquée → 409",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const av = await soldeServeur(t); const d1 = await call("finance.depense", t, { date: "2026-11-18", montant: 3000, categorie: "Fonctionnement", libelle: "Fournitures bureau", justificatif: "FACT-2026-055", statut: "payee" }); const r1 = await call("finance.recette", t, { date: "2026-11-19", montant: 10000, mode: "Espèces", ref: "DON-2026-002", source: "Dons membres assemblée" }); const r2 = await call("finance.recette", t, { date: "2026-11-19", montant: 5000, mode: "Espèces", ref: "DON-2026-001", source: "Doublon de référence" }); const ap = await soldeServeur(t); return { obtenu: "dépense " + d1.status + " ; recette " + r1.status + " ; dupliquée " + r2.status + " (" + r2.code + ") ; trésorerie : " + av.toLocaleString("fr-FR") + " → " + ap.toLocaleString("fr-FR"), pass: d1.status === 200 && r1.status === 200 && r2.status === 409 && ap - av === 7000, detail: "Dépense payée = sortie réelle ; la référence de reçu unique protège la recette contre le double enregistrement." } } },
+  { id: "T12", g: 3, titre: "Dépenses invalides refusées", attendu: "montant 0, catégorie inconnue, date absente, date future → tous 422, motifs distincts",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r1 = await call("finance.depense", t, { date: "2026-11-18", montant: 0, categorie: "Fonctionnement", libelle: "Test" }); const r2 = await call("finance.depense", t, { date: "2026-11-18", montant: 1000, categorie: "Inconnue", libelle: "Test" }); const r3 = await call("finance.depense", t, { montant: 1000, categorie: "Fonctionnement", libelle: "Test" }); const r4 = await call("finance.depense", t, { date: "2027-05-01", montant: 1000, categorie: "Fonctionnement", libelle: "Test" }); return { obtenu: [r1, r2, r3, r4].map(x => x.code).join(" / "), pass: r1.status === 422 && r2.status === 422 && r3.status === 422 && r4.status === 422 && /future/.test(r4.msg), detail: "RG-F4 : date, type, catégorie, montant et libellé obligatoires ; une dépense se saisit à son opération réelle." } } },
+  { id: "T13", g: 3, titre: "Dépense à payer (dette) puis règlement lié (RG-D2)", attendu: "dette 2 000 créée sans flux ; règlement partiel 3 000 sur la dette de 8 000 → trésorerie −3 000, dette restante 5 000 ; règlement excessif → 422",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const av = await soldeServeur(t); const d = await call("finance.depense", t, { date: "2026-11-18", montant: 2000, categorie: "Fonctionnement", libelle: "Transport coursier", justificatif: "FACT-2026-060", statut: "a_payer" }); const mat = (await call("finance.ledger", t, { type: "depense" })).data.find(x => x.libelle === "Matériel palabres de fin d'année"); const rg = await call("finance.regler_dette", t, { cible: mat.no, montant: 3000, mode: "Espèces", ref: "REG-DETTE-001", date: "2026-11-19" }); const rg2 = await call("finance.regler_dette", t, { cible: mat.no, montant: 99999, mode: "Espèces", ref: "REG-DETTE-002", date: "2026-11-19" }); const ap = await soldeServeur(t); const rc = await recalc(t); return { obtenu: "dette créée " + d.status + " ; règlement " + rg.status + " (" + rg.msg.slice(0, 80) + "…) ; excessif " + rg2.status + " ; trésorerie " + (ap - av) + " FCFA ; dettes serveur : " + fc(rc.dettes === null ? 0 : (await call("finance.suivi", t, { annee: 2026 })).data.etat.dettes), pass: d.status === 200 && rg.status === 200 && rg2.status === 422 && ap - av === -3000, detail: "RG-D2 : le règlement d'une dette est une opération financière liée à la dette ; la sortie de trésorerie n'a lieu qu'au règlement réel." } } },
+  { id: "T14", g: 3, titre: "Suivi des cotisations par mois et par année", attendu: "2026 : dues 92 000 (92 mois actifs × 1 000), encaissées cohérentes, taux corrects ; recalcule par mois sans conflit",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const s = await call("finance.suivi", t, { annee: 2026 }); const nov = s.data.rows.find(x => x.mois === "2026-11"); const mars = s.data.rows.find(x => x.mois === "2026-03"); const rc = await recalc(t); const encCalc = rc.val.filter(e => e.type === "paiement").reduce((x, e) => x + (e.affectations || []).filter(a => a.kind === "cotis" && a.mois.startsWith("2026")).reduce((y, a) => y + a.montant, 0), 0); return { obtenu: "dues " + fc(s.data.etat.cotisDues) + " ; encaissées " + fc(s.data.etat.cotisEncaissees) + " (recalcul : " + fc(encCalc) + ") ; novembre : " + nov.dues + " dues / " + nov.encaissees + " encaissées (" + nov.taux + " %) ; mars : " + mars.dues + " / " + mars.encaissees, pass: s.data.etat.cotisDues === 92000 && s.data.etat.cotisEncaissees === encCalc && nov.dues === 8000 && mars.taux === 100, detail: "92 mois actifs en 2026 : 5 membres à 11 mois, Ouédraogo 8 (désactivé le 15/08), Koné et Kanté 10, Diallo 9 — RG-C1 : plus d'obligation après la désactivation, donc 8 000 dues en novembre (8 membres actifs)." } } },
+  { id: "T15", g: 3, titre: "Solde de trésorerie = entrées et sorties réellement enregistrées", attendu: "solde serveur === recalcul indépendant depuis le journal brut ; les pénalités dues n'y participent jamais",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const rc = await recalc(t); const sol = await soldeServeur(t); const s = await call("finance.suivi", t, { annee: 2026 }); const fluxPen = rc.lg.filter(e => e.type === "penalite" && !rc.lg.some(x => x.type === "contrepassation" && x.cible === e.no)).reduce((x, e) => x + (e.flux || 0), 0); return { obtenu: "serveur " + fc(sol) + " ; recalcul " + fc(rc.solde) + " ; Σ flux des constats de pénalité : " + fluxPen, pass: sol === rc.solde && fluxPen === 0 && rc.solde === s.data.etat.solde, detail: "Règle du bureau : le solde ne se construit qu'avec les entrées et sorties réelles — une pénalité due (flux nul) n'en fait jamais partie tant qu'elle n'est pas encaissée." } } },
+
+  /* ── G4 · Corrections autorisées, justifiées, traçables ── */
+  { id: "T16", g: 4, titre: "Contre-passation d'un paiement (RG-F3)", attendu: "écriture inverse référencée, imputations annulées (Sanogo redevient débiteur), paire origine+inverse neutre en trésorerie, écriture d'origine toujours visible",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const av = await soldeServeur(t); const orig = (await call("finance.ledger", t, { matricule: "ADLCI-2025-0002" })).data.find(x => x.type === "paiement" && x.ref === "REC-2026-11-100"); const r = await call("finance.contrepasser", t, { no: orig.no, motif: "Erreur de saisie : le reçu 100 concernait un autre paiement" }); const st = (await call("finance.state", t, { matricule: "ADLCI-2025-0002" })).data; const origVisible = (await call("finance.ledger", t, { matricule: "ADLCI-2025-0002" })).data.some(x => x.no === orig.no && x.type === "paiement"); const ap = await soldeServeur(t); return { obtenu: "contre-passation " + r.status + " ; arriérés Sanogo → " + fc(st.arriere) + ", pénalités → " + fc(st.penDues) + " ; origine visible : " + origVisible + " ; trésorerie " + (ap - av) + " FCFA", pass: r.status === 200 && st.arriere === 1500 && st.penDues === 500 && origVisible === true && ap - av === -2000, detail: "RG-F3 : l'origine reste au journal (marquée annulée) et l'inverse la compense — la paire contribue 0 net au solde, l'opération est annulée ; seules les imputations du paiement annulé cessent de compter." } } },
+  { id: "T17", g: 4, titre: "Contre-passation d'une dépense (RG-F3 : écriture inverse référencée)", attendu: "la dépense erronée de 3 000 payée est annulée par une écriture inverse +3 000 ; les deux restent visibles ; la paire est neutre en trésorerie et la dépense annulée sort du calcul des dépenses payées",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const av = await soldeServeur(t); const dep = (await call("finance.ledger", t, { type: "depense" })).data.find(x => x.libelle === "Fournitures bureau"); const r = await call("finance.contrepasser", t, { no: dep.no, motif: "Annulation : fournitures retournées au fournisseur" }); const ap = await soldeServeur(t); const inv = (await call("finance.ledger", t, {})).data.find(x => x.type === "contrepassation" && x.cible === dep.no); const s = await call("finance.suivi", t, { annee: 2026 }); const fonct = (s.data.etat.depensesCat["Fonctionnement"] || 0); return { obtenu: r.status + " — " + (r.msg || "").slice(0, 90) + " ; trésorerie " + (ap - av) + " FCFA ; écriture inverse flux : " + inv.flux + " ; Fonctionnement payé : " + fc(fonct), pass: r.status === 200 && ap - av === 3000 && inv && inv.flux === 3000 && fonct === 5000, detail: "La recette d'annulation compense la dépense erronée (RG-F3) : la paire contribue 0 net au solde et la dépense annulée sort du calcul des dépenses payées par catégorie." } } },
+  { id: "T18", g: 4, titre: "Remise de pénalité par décision tracée (RG-P3)", attendu: "sans référence de décision → 422 ; avec décision du bureau dans le motif → remise de la pénalité de Koné (500), constat toujours visible, aucune sortie de trésorerie",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const av = await soldeServeur(t); const pen = (await call("finance.ledger", t, { matricule: "ADLCI-2026-0001", type: "penalite" })).data[0]; const r1 = await call("finance.contrepasser", t, { no: pen.no, motif: "remise" }); const r2 = await call("finance.contrepasser", t, { no: pen.no, motif: "Décision du bureau du 2026-11-17 : remise pour maladie chronique — PV page 4" }); const st = (await call("finance.state", t, { matricule: "ADLCI-2026-0001" })).data; const penVis = (await call("finance.ledger", t, { matricule: "ADLCI-2026-0001", type: "penalite" })).data.some(x => x.no === pen.no); const ap = await soldeServeur(t); return { obtenu: "sans décision " + r1.status + " (" + r1.code + ") ; avec décision " + r2.status + " ; pénalités de Koné → " + fc(st.penDues) + " ; constat visible : " + penVis + " ; trésorerie " + (ap - av) + " FCFA", pass: r1.status === 422 && r2.status === 200 && st.penDues === 0 && penVis === true && ap - av === 0, detail: "RG-P3 : le bureau remet la pénalité par décision tracée ; la remise n'est ni une recette ni une dépense — elle réduit la dette." } } },
+  { id: "T19", g: 4, titre: "Corrections réservées et gardes-fous", attendu: "double contre-passation → 409 ; motif court → 422 ; président → 403 (RG-F1) ; finance.update et finance.delete → 404",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const tp = (await login("m.kante", "President-2026!")).data.token; const cp = (await call("finance.ledger", t, { type: "contrepassation" })).data[0]; const r1 = await call("finance.contrepasser", t, { no: cp.cible, motif: "Décision du bureau : seconde remise impossible" }); const r2 = await call("finance.contrepasser", t, { no: 1, motif: "court" }); const r3 = await call("finance.contrepasser", tp, { no: 1, motif: "Correction tentée par le président" }); const r4 = await call("finance.update", t, { no: 1 }); const r5 = await call("finance.delete", t, { no: 1 }); return { obtenu: [r1, r2, r3, r4, r5].map(x => x.status + (x.code ? " (" + x.code + ")" : "")).join(" ; "), pass: r1.status === 409 && r2.status === 422 && r3.status === 403 && r4.status === 404 && r5.status === 404, detail: "Toute correction doit être autorisée, justifiée et traçable : une écriture annulée ne se contre-passe pas deux fois ; le président consulte mais ne saisit pas (D6, RG-F1)." } } },
+  { id: "T20", g: 4, titre: "Cohérence globale du journal après toutes les corrections", attendu: "numéros consécutifs sans trou ; chaque contre-passation pointe une écriture existante ; aucune écriture annulée deux fois ; imputations pénalités figées cohérentes avec les constats",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const rc = await recalc(t); const nums = rc.lg.map(e => e.no).sort((a, b) => a - b); const sansTrou = nums.every((n, i) => n === i + 1); let conflits = 0; for (const e of rc.lg) { if (e.type === "contrepassation") { if (!rc.lg.find(x => x.no === e.cible) || rc.lg.filter(x => x.type === "contrepassation" && x.cible === e.cible).length > 1) conflits++; } if (e.type === "paiement") for (const a of e.affectations || []) if (a.kind === "penalite" && !rc.lg.find(x => x.no === a.no_penalite && x.type === "penalite")) conflits++; } return { obtenu: rc.lg.length + " écritures, n° 1 à " + nums[nums.length - 1] + " sans trou : " + (sansTrou ? "oui" : "NON") + " ; incohérences de liens : " + conflits, pass: sansTrou && conflits === 0, detail: "L'invariant comptable tient après paiements, imputations, dettes, règlements et contre-passations." } } },
+
+  /* ── G5 · États financiers, créances/dettes, sécurité ── */
+  { id: "T21", g: 5, titre: "État financier : dus ≠ encaissés, pénalités constatées ≠ réglées ≠ remises", attendu: "dues 92 000 ; constatées 3 000 ; réglées 1 000 ; remises 500 ; encaissé = cotisations imputées uniquement ; dépenses par catégorie cohérentes",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const s = await call("finance.suivi", t, { annee: 2026 }); const et = s.data.etat; const rc = await recalc(t); const encCalc = rc.val.filter(e => e.type === "paiement").reduce((x, e) => x + (e.affectations || []).filter(a => a.kind === "cotis" && (a.mois || "").startsWith("2026")).reduce((y, a) => y + a.montant, 0), 0); const penDueTot = rc.penalites; const equil = et.penConstatees - et.penReglees - et.penRemises === penDueTot; const catFonct = (et.depensesCat["Fonctionnement"] || 0); return { obtenu: "dues " + fc(et.cotisDues) + " ; constatées " + fc(et.penConstatees) + " ; réglées " + fc(et.penReglees) + " ; remises " + fc(et.penRemises) + " ; égalité constatées−réglées−remises = dues : " + equil + " (" + fc(penDueTot) + ") ; Fonctionnement payé : " + fc(catFonct), pass: et.cotisDues === 92000 && et.penConstatees === 3000 && et.penReglees === 1000 && et.penRemises === 500 && equil && et.cotisEncaissees === encCalc && catFonct === 5000, detail: "Fonctionnement payé 2026 : 5 000 (transport mission) — la dépense 3 000 a été annulée en T17, l'écriture annulée sort du calcul." } } },
+  { id: "T22", g: 5, titre: "Dettes et créances selon les natures RG-D1", attendu: "créances : arriérés 3 500 + pénalités 1 500 = 5 000 ; dettes : avances accordées 3 000 + dépenses à payer 7 000 = 10 000 ; recalcul indépendant identique",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const s = await call("finance.suivi", t, { annee: 2026 }); const et = s.data.etat; const rc = await recalc(t); return { obtenu: "créances serveur " + fc(et.creances) + " (recalcul " + fc(rc.creances) + ") ; dettes serveur " + fc(et.dettes) + " (recalcul " + fc(rc.dettes) + ")", pass: et.creances === 5000 && et.dettes === 10000 && rc.creances === 5000 && rc.dettes === 10000, detail: "Sanogo 1 500 d'arriérés + 500 de pénalité ; Ouédraogo 1 000 + 1 000 ; Koné 1 000 d'arriérés, pénalité remise — l'avance de Yao est une dette de l'association." } } },
+  { id: "T23", g: 5, titre: "Charge XSS dans une référence et DTO sans champ interne", attendu: "référence malveillante stockée mais rendue échappée ; aucune clé sensible dans les écritures",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r = await call("finance.pay", t, { matricule: "ADLCI-2025-0001", montant: 1000, mode: "Espèces", ref: "<img src=x onerror=alert(1)>", date: "2026-11-19" }); const probe = document.createElement("div"); probe.innerHTML = '<p>' + esc(r.data.ref) + '</p>'; const inj = probe.querySelectorAll("img,script").length; const keys = new Set(); (await call("finance.ledger", t, {})).data.forEach(e => Object.keys(e).forEach(k => keys.add(k))); const leak = [...keys].filter(k => /hash|salt|token|secret|pwd/i.test(k)); return { obtenu: (inj === 0 ? "rendu échappé" : inj + " nœuds injectés (!)") + " ; clés exposées : " + keys.size + (leak.length ? " ; FUITE : " + leak.join(", ") : " ; aucune fuite"), pass: r.status === 200 && inj === 0 && leak.length === 0, detail: "Le serveur stocke la valeur ; l'affichage échappe systématiquement ; la projection DTO ne porte aucun champ interne." } } },
+  { id: "T24", g: 5, titre: "Jeton forgé rejeté ; journal d'audit intègre puis falsification détectée", attendu: "401 sur jeton forgé ; vérification intègre sur toute la campagne ; altération simulée détectée et désignée",
+    async fn() { const t = (await login("s.diallo", "Admin-2026!CI")).data.token; const f = await call("finance.ledger", "forged" + "a".repeat(56)); const v1 = await call("audit.verify", t); await call("audit.tamper_demo", t); const v2 = await call("audit.verify", t); return { obtenu: "jeton forgé : " + f.status + " ; chaîne avant : " + (v1.data.integre ? "intègre (" + v1.data.seq + " entrées)" : "compromise !") + " ; après altération : " + (v2.data.integre ? "non détectée (!)" : "DÉTECTÉE n° " + v2.data.seq), pass: f.status === 401 && v1.data.integre === true && v2.data.integre === false, detail: "Chaque opération financière et chaque refus est journalisé : autorisé, justifié, traçable." } } }
+];
+
+async function runBench() {
+  const t0 = performance.now();
+  await SERVER.seed();
+  const out = [];
+  for (const sc of BENCH) {
+    try { const r = await sc.fn(); out.push({ ...sc, ...r }); }
+    catch (e) { out.push({ ...sc, obtenu: "exception : " + e.message, pass: false, detail: "" }); }
+  }
+  const ms = Math.round(performance.now() - t0);
+  const pass = out.filter(r => r.pass).length;
+  BENCH_RESULTS = { date: new Date().toLocaleString("fr-FR"), module: "financier et comptable v2.0", total: out.length, pass, fail: out.length - pass, ms, scenarios: out };
+  await doLogout(true, true);
+  await SERVER.seed();
+  renderBench(out, pass, out.length, ms);
+  toast(pass === out.length ? "ok" : "err", pass === out.length ? "Suite complète : " + pass + "/" + out.length + " scénarios conformes — calculs vérifiés par recalcul indépendant." : "Suite terminée avec " + (out.length - pass) + " écart(s) — voir le détail.");
+}
+/* ==================================================================
+   CONSOLE D'INTRUSION
+   ================================================================== */
+const ATTACKS = [
+  { t: "Un membre ordinaire encaisse un paiement", d: "k.yao appelle finance.pay directement — RG-F1 : la saisie est réservée au trésorier.", async run() { const t = (await login("k.yao", "Membre-2026!CI")).data.token; return await call("finance.pay", t, { matricule: "ADLCI-2025-0001", montant: 1000, mode: "Espèces", ref: "ATK-001", date: "2026-11-19" }); } },
+  { t: "Le président remet une pénalité", d: "m.kante contre-passe un constat — le président consulte mais ne saisit pas (D6, RG-F1).", async run() { const t = (await login("m.kante", "President-2026!")).data.token; const pen = (await call("finance.ledger", t, { type: "penalite" })).data[0]; return await call("finance.contrepasser", t, { no: pen.no, motif: "Remise tentée par le président du bureau" }); } },
+  { t: "Supprimer une opération du journal", d: "Le trésorier lui-même tente finance.delete — l'endpoint n'existe pas (RG-F3).", async run() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; return await call("finance.delete", t, { no: 1 }); } },
+  { t: "Le trésorier modifie les paramètres comptables", d: "a.traore tente de porter la pénalité à 5 000 FCFA — modification réservée à l'administrateur (proposition V4 à valider).", async run() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; return await call("params.set", t, { type: "penalite", montant: 5000, depuis: "2026-12", motif: "Modification tentée par le trésorier" }); } },
+  { t: "Lister le journal avec un jeton forgé", d: "Un jeton inventé est présenté comme session valide.", async run() { return await call("finance.ledger", "forged-" + crypto.getRandomValues(new Uint8Array(16)).join("")); } }
+];
+
+/* ==================================================================
+   INTERFACE CLIENT — présentation uniquement, aucune sécurité ici
+   ================================================================== */
+const $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
+function toast(kind, msg) { const t = document.createElement("div"); t.className = "toast " + (kind === "ok" ? "ok" : kind === "err" ? "err" : ""); t.textContent = msg; $("#toasts").appendChild(t); setTimeout(() => { t.style.opacity = "0"; t.style.transition = "opacity .4s"; setTimeout(() => t.remove(), 400); }, 4500); }
+const initials = n => String(n).split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
+
+let SESSION = { token: null, user: null, perms: [] };
+const TABS = [
+  { id: "cotis", label: "Cotisations", perm: "finance.view_all" },
+  { id: "journal", label: "Journal financier", perm: "finance.view_all" },
+  { id: "rd", label: "Recettes & dépenses", perm: "finance.view_all" },
+  { id: "tresorerie", label: "Trésorerie & états", perm: "finance.view_all" },
+  { id: "situation", label: "Ma situation", perm: "finance.view_self", ownOnly: true },
+  { id: "param", label: "Paramètres", perm: "params.set" },
+  { id: "bench", label: "Banc de tests", always: true },
+  { id: "intrusion", label: "Console d'intrusion", always: true },
+  { id: "archi", label: "Règles & production", always: true }
+];
+function buildNav() {
+  const nav = $("#topnav"); nav.innerHTML = "";
+  if (!SESSION.token) { nav.innerHTML = `<button class="on" data-tab="login">Connexion</button>`; $$("#topnav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab))); return; }
+  const vis = TABS.filter(t => t.always || (t.perm && SESSION.perms.includes(t.perm) && (!t.ownOnly || SESSION.user.matricule)));
+  nav.innerHTML = vis.map((t, i) => `<button data-tab="${t.id}"${i === 0 ? ` class="on"` : ``}>${t.label}</button>`).join("");
+  $$("#topnav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+  showTab(vis[0].id);
+}
+function showTab(id) {
+  $$(".tab").forEach(v => v.classList.remove("on"));
+  const el = $("#v-" + id); if (el) el.classList.add("on");
+  $$("#topnav button").forEach(b => b.classList.toggle("on", b.dataset.tab === id));
+  window.scrollTo({ top: 0 });
+  if (id === "cotis") renderCotis();
+  if (id === "journal") renderJournal();
+  if (id === "rd") renderRD();
+  if (id === "tresorerie") renderTreso();
+  if (id === "situation" && SESSION.user.matricule) openSituation(SESSION.user.matricule, true);
+  if (id === "param") renderParam();
+  if (id === "intrusion") renderAttacks();
+  if (id === "archi") renderArchi();
+}
+const LIBTYPE = { paiement: ["Paiement", "ok"], penalite: ["Constat de pénalité (dette)", "warn"], depense: ["Dépense", "bad"], recette: ["Autre recette", "ok"], reglement_dette: ["Règlement de dette", "info"], contrepassation: ["Contre-passation", "neutral"] };
+
+/* ── Cotisations : liste et KPIs ── */
+let COTIS = { rows: [], tot: null, members: [] };
+async function renderCotis() {
+  const [rRec, rSu] = await Promise.all([
+    SERVER.api({ endpoint: "finance.recoveries", token: SESSION.token }),
+    SERVER.api({ endpoint: "finance.suivi", token: SESSION.token, body: { annee: 2026 } })
+  ]);
+  if (rRec.status !== 200) { doLogout(true); return; }
+  COTIS.rows = rRec.data.rows; COTIS.tot = rRec.data.tot;
+  const canPay = SESSION.perms.includes("finance.create");
+  $("#btn-pay-open").style.display = canPay ? "" : "none";
+  $("#cotis-sub").textContent = canPay
+    ? "Imputation RG-C3 affichée avant confirmation (RG-F2) ; cotisation due au plus tard le 10 (RG-C2) ; pénalité de 500 FCFA constatée automatiquement le 11 pour chaque mois impayé (D3, RG-P1) comme dette — jamais comme recette."
+    : "Lecture selon votre rôle : la saisie est réservée au trésorier (RG-F1, décision D6), vérifiée côté serveur à chaque appel.";
+  $("#k-cotis-due").textContent = fc(COTIS.tot.arrears);
+  $("#k-pen-due").textContent = fc(COTIS.tot.penalites);
+  $("#k-retard").textContent = COTIS.tot.enRetard + " / " + COTIS.tot.aJour;
+  $("#k-solde").textContent = fc(rSu.data.etat.solde);
+  drawCotisTable();
+  if (!COTIS.members.length) {
+    const rM = await SERVER.api({ endpoint: "members.list", token: SESSION.token });
+    if (rM.status === 200) {
+      COTIS.members = rM.data;
+      COTIS.members.forEach(m => {
+        $("#pay-mat").insertAdjacentHTML("beforeend", `<option value="${m.matricule}">${m.matricule} — ${m.nom} ${m.prenom}${m.statut === "inactif" ? " (inactif)" : ""}</option>`);
+        $("#jl-mat").insertAdjacentHTML("beforeend", `<option value="${m.matricule}">${m.matricule}</option>`);
+      });
+      SERVER.CATEGORIES.forEach(c => $("#dep-cat").insertAdjacentHTML("beforeend", `<option value="${c}">${c}</option>`));
+      SERVER.TRIBUS_LOCAL.forEach(t => $("#fin-tribu").insertAdjacentHTML("beforeend", `<option value="${t}">${t}</option>`));
+    }
+  }
+}
+function drawCotisTable() {
+  const q = norm2($("#fin-q").value), tribu = $("#fin-tribu").value, fil = $("#fin-dus").value;
+  let rows = COTIS.rows.filter(r => (!q || norm2(r.nom + " " + r.prenom).includes(q) || r.matricule.toLowerCase().includes(q)) && (!tribu || r.tribu === tribu) && (!fil || (fil === "retard" ? r.enRetard : !r.enRetard)));
+  $("#cotis-tbl tbody").innerHTML = rows.map(r => `<tr>
+    <td data-l="Membre"><div class="cell-name"><span class="ava">${initials(r.prenom + " " + r.nom)}</span><span class="n"><b>${esc(r.nom + " " + r.prenom)}</b><small>${r.statut_membre === "inactif" ? "Inactif — dette conservée" : "Actif"}</small></span></div></td>
+    <td data-l="Matricule"><span class="mat">${esc(r.matricule)}</span></td>
+    <td data-l="Tribu">${esc(r.tribu)}</td>
+    <td data-l="Situation">${r.enRetard ? `<span class="tag warn">En retard</span>` : `<span class="tag ok">À jour</span>`}${r.avance ? ` <span class="tag info">Avance ${fc(r.avance)}</span>` : ""}</td>
+    <td data-l="Détail" style="font-family:var(--f-num);font-size:12px">${r.arrears ? "arriérés " + fc(r.arrears) : "—"}${r.penalites ? " · pénalités " + fc(r.penalites) : ""}</td>
+    <td data-l="Créance" class="num">${fc(r.arrears + r.penalites)}</td>
+    <td data-l="Payé à ce jour" class="num">${fc(r.totalPaye)}</td>
+    <td class="act"><button class="btn ghost sm" data-sit="${r.matricule}">Situation</button></td></tr>`).join("");
+  $$("#cotis-tbl [data-sit]").forEach(b => b.addEventListener("click", () => { SIT_BACK = "cotis"; openSituation(b.dataset.sit); }));
+}
+const norm2 = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+/* ── Encaissement en deux étapes (RG-F2) avec imputation RG-C3 ── */
+let PAY_DRAFT = null;
+async function previewPay() {
+  const body = { matricule: $("#pay-mat").value, montant: Number($("#pay-montant").value), mode: $("#pay-mode").value, ref: $("#pay-ref").value.trim(), date: SERVER.AUJ.date };
+  let ok = true;
+  [["f-pay-mat", body.matricule], ["f-pay-montant", body.montant > 0], ["f-pay-ref", body.ref]].forEach(([f, v]) => { $("#" + f).classList.toggle("err", !v); if (!v) ok = false; });
+  if (!ok) return;
+  const r = await SERVER.api({ endpoint: "finance.preview", token: SESSION.token, body: { matricule: body.matricule, montant: body.montant } });
+  if (r.status !== 200) { $("#pay-preview-zone").innerHTML = `<div class="note err"><span>⚠️</span><span><b>${esc(r.msg)}</b></span></div>`; $("#pay-confirm-zone").style.display = "none"; PAY_DRAFT = null; return; }
+  PAY_DRAFT = body;
+  const items = r.data.items.map(a => `<div class="af-row"><span>${a.kind === "cotis" ? "Cotisation" : a.kind === "penalite" ? "Pénalité du mois" : "Avance"} ${a.mois}</span><b>${a.montant.toLocaleString("fr-FR")} ${SERVER.DEVISE}</b></div>`).join("");
+  $("#pay-preview-zone").innerHTML = `<div class="af-box">
+    <b>${esc(r.data.nom)} — ${body.montant.toLocaleString("fr-FR")} ${SERVER.DEVISE} (${esc(body.mode)}, reçu ${esc(body.ref)})</b>
+    <div style="margin-top:7px">${items}</div>
+    <div class="af-total-row"><span>Total imputé</span><span>${r.data.montant.toLocaleString("fr-FR")} ${SERVER.DEVISE}</span></div>
+    <p style="font-size:12px;color:var(--ink-3);margin-top:7px">Ordre RG-C3 : cotisation du mois ancien, puis sa pénalité, puis mois suivant ; l'excédent part aux mois futurs (avance).</p></div>`;
+  $("#pay-confirm-zone").style.display = "block";
+  $("#pay-result").innerHTML = "";
+}
+async function confirmPay() {
+  if (!PAY_DRAFT) return;
+  const r = await SERVER.api({ endpoint: "finance.pay", token: SESSION.token, body: PAY_DRAFT });
+  $("#pay-result").innerHTML = `<div class="note ${r.status === 200 ? "ok" : "err"}"><span>${r.status === 200 ? "✓" : "⚠️"}</span><span><b>${esc(r.msg)}</b>${r.auditId ? ` (journal n° ${r.auditId})` : ""}</span></div>`;
+  if (r.status === 200) {
+    toast("ok", r.msg.slice(0, 130));
+    $("#pay-ref").value = ""; $("#pay-montant").value = "";
+    $("#pay-preview-zone").innerHTML = `<div class="note info"><span>ℹ️</span><span><b>Opération enregistrée.</b> Préparez l'opération suivante.</span></div>`;
+    $("#pay-confirm-zone").style.display = "none"; PAY_DRAFT = null;
+    renderCotis();
+  } else toast("err", r.msg.slice(0, 130));
+}
+
+/* ── Situation d'un membre ── */
+let SIT_BACK = "cotis";
+async function openSituation(matricule, ownMode) {
+  const r = await SERVER.api({ endpoint: "finance.state", token: SESSION.token, body: { matricule } });
+  if (r.status !== 200) { toast("err", r.msg); return; }
+  const d = r.data;
+  $("#sit-title").textContent = "Situation de " + d.matricule;
+  const penRows = d.penDetail.map(p => `<div class="af-row"><span>Pénalité mois ${p.mois_cible} (constat n° ${p.no})</span><b>reste ${p.reste.toLocaleString("fr-FR")} ${SERVER.DEVISE}</b></div>`).join("") || "<i style=\"font-size:12.5px;color:var(--ink-3)\">aucune</i>";
+  $("#sit-infos").innerHTML = `<dl class="dl">
+    <dt>Nom</dt><dd><b>${esc(d.nom + " " + d.prenom)}</b> ${d.statut === "inactif" ? `<span class="tag bad">Inactif — obligations enregistrées restantes dues</span>` : ""}</dd>
+    <dt>Tribu</dt><dd>${esc(d.tribu)}</dd><dt>Adhésion</dt><dd>${esc(d.date_adhesion)}${d.date_desactivation ? " — désactivé le " + esc(d.date_desactivation) : ""}</dd>
+    <dt>Arriérés (cotisations)</dt><dd><b style="color:${d.arriere ? "var(--warn)" : "var(--ok)"}">${fc(d.arriere)}</b></dd>
+    <dt>Pénalités dues (dette)</dt><dd><b style="color:${d.penDues ? "var(--warn)" : "var(--ok)"}">${fc(d.penDues)}</b></dd>
+    <dt>Détail pénalités</dt><dd>${penRows}</dd>
+    <dt>Avance accordée</dt><dd><b style="color:var(--info)">${fc(d.avance)}</b> ${d.avance ? "(dette de l'association envers le membre)" : ""}</dd>
+    <dt>Créance totale</dt><dd><b>${fc(d.arriere + d.penDues)}</b></dd>
+    <dt>Payé à ce jour</dt><dd>${fc(d.totalPaye)}</dd></dl>`;
+  let chips = "";
+  const year = {};
+  d.mois.forEach(x => { (year[x.mois.slice(0, 4)] = year[x.mois.slice(0, 4)] || []).push(x); });
+  Object.keys(year).sort().forEach(y => {
+    chips += `<div style="margin-bottom:6px"><b style="font-size:12px;color:var(--ink-3)">${y}</b><br>` + year[y].map(x => `<span class="mois-chip ${x.etat === "regle" ? "paye" : x.etat === "avance" ? "avance" : x.etat === "partiel" ? "partiel" : "du"}" title="dû ${x.due} · réglé ${x.regle}${x.penalite ? " · pénalité " + x.penalite : ""}">${x.mois}${x.penalite ? " +P" : ""}</span>`).join("") + `</div>`;
+  });
+  $("#sit-mois").innerHTML = chips;
+  showTabTab("situation");
+  const lg = await SERVER.api({ endpoint: "finance.ledger", token: SESSION.token, body: { matricule } });
+  $("#sit-tbl tbody").innerHTML = lg.status === 200 && lg.data.length ? lg.data.map(e => `<tr>
+    <td data-l="N°" class="num">${e.no}</td><td data-l="Quand">${esc(e.ts)}</td>
+    <td data-l="Type"><span class="tag ${LIBTYPE[e.type] ? LIBTYPE[e.type][1] : "neutral"}">${LIBTYPE[e.type] ? LIBTYPE[e.type][0] : e.type}</span></td>
+    <td data-l="Détail">${esc(det(e))}</td><td data-l="Flux" class="num" style="color:${e.flux < 0 ? "var(--danger)" : e.flux > 0 ? "var(--ok)" : "var(--ink-3)"}">${e.flux ? fc(e.flux) : "—"}</td></tr>`).join("") : `<tr><td colspan="5" style="color:var(--ink-3)">Aucune écriture pour ce matricule.</td></tr>`;
+}
+function det(e) {
+  if (e.type === "paiement") return (e.affectations || []).map(a => (a.kind === "penalite" ? "pénalité " + a.mois : (a.kind === "avance" ? "avance " : a.mois)) + " " + a.montant.toLocaleString("fr-FR")).join(" ; ") + " — reçu " + e.ref;
+  if (e.type === "penalite") return "mois en retard " + e.mois_cible + " (RG-P1) — dette, jamais une recette";
+  if (e.type === "depense") return e.libelle + " (" + e.categorie + ", " + (e.statut === "payee" ? "payée" : "à payer") + ")" + (e.justificatif ? " — just. " + e.justificatif : "");
+  if (e.type === "recette") return e.source + " — reçu " + e.ref;
+  if (e.type === "reglement_dette") return e.libelle + " — réf " + e.ref;
+  if (e.type === "contrepassation") return "annule l'écriture n° " + e.cible + (e.motif ? " — motif : " + e.motif.slice(0, 80) : "");
+  return e.motif || "";
+}
+function showTabTab(id) { $$(".tab").forEach(v => v.classList.remove("on")); $("#v-" + id).classList.add("on"); $$("#topnav button").forEach(b => b.classList.toggle("on", b.dataset.tab === id)); }
+
+/* ── Journal financier ── */
+async function renderJournal() {
+  if (!SESSION.perms.includes("finance.view_all")) return;
+  const r = await SERVER.api({ endpoint: "finance.ledger", token: SESSION.token });
+  if (r.status !== 200) return;
+  const annules = new Set(r.data.filter(e => e.type === "contrepassation").map(e => e.cible));
+  const mat = $("#jl-mat").value, type = $("#jl-type").value, mois = $("#jl-mois").value;
+  const rows = r.data.filter(e => (!mat || e.matricule === mat) && (!type || e.type === type) && (!mois || (e.date || "").slice(0, 7) === mois || e.mois_cible === mois)).slice(-120).reverse();
+  const canRev = SESSION.perms.includes("finance.create");
+  $("#jl-tbl tbody").innerHTML = rows.map(e => `<tr>
+    <td data-l="N°" class="num">${e.no}</td><td data-l="Quand">${esc(e.ts)}</td><td data-l="Auteur">${esc(e.actor)}</td>
+    <td data-l="Type"><span class="tag ${LIBTYPE[e.type] ? LIBTYPE[e.type][1] : "neutral"}">${LIBTYPE[e.type] ? LIBTYPE[e.type][0] : e.type}</span>${annules.has(e.no) ? ` <span class="tag bad">annulée</span>` : ""}</td>
+    <td data-l="Partie">${e.matricule ? `<span class="mat">${esc(e.matricule)}</span>` : e.type === "penalite" ? "système" : "association"}</td>
+    <td data-l="Détail">${esc(det(e))}</td>
+    <td data-l="Flux" class="num" style="color:${e.flux < 0 ? "var(--danger)" : e.flux > 0 ? "var(--ok)" : "var(--ink-3)"}">${e.flux ? (e.flux > 0 ? "+" : "") + fc(e.flux) : "—"}</td>
+    <td class="act">${canRev && !annules.has(e.no) && e.type !== "contrepassation" ? `<button class="btn danger sm" data-rev="${e.no}">Annuler</button>` : ""}</td></tr>`).join("");
+  $$("#jl-tbl [data-rev]").forEach(b => b.addEventListener("click", async () => {
+    const motif = prompt("Motif de la correction (minimum 10 caractères ; pour une remise de pénalité RG-P3, citez la décision du bureau) :") || "";
+    if (!motif) { toast("err", "Contre-passation abandonnée : un motif est nécessaire."); return; }
+    const rr = await SERVER.api({ endpoint: "finance.contrepasser", token: SESSION.token, body: { no: +b.dataset.rev, motif } });
+    toast(rr.status === 200 ? "ok" : "err", rr.msg.slice(0, 150));
+    renderJournal();
+  }));
+}
+
+/* ── Recettes & dépenses (trois formulaires en deux étapes) ── */
+let DEP_DRAFT = null, REC_DRAFT = null, REG_DRAFT = null;
+async function renderRD() {
+  const r = await SERVER.api({ endpoint: "finance.ledger", token: SESSION.token, body: { type: "depense" } });
+  if (r.status !== 200) return;
+  const annules = new Set((await SERVER.api({ endpoint: "finance.ledger", token: SESSION.token, body: { type: "contrepassation" } })).data.map(e => e.cible));
+  const rows = r.data.filter(e => !annules.has(e.no)).sort((a, b) => b.no - a.no);
+  $("#rd-count").textContent = rows.length + " dépense(s)";
+  $("#rd-tbl tbody").innerHTML = rows.map(e => `<tr>
+    <td data-l="N°" class="num">${e.no}</td><td data-l="Date">${esc(e.date)}</td><td data-l="Libellé">${esc(e.libelle)}</td>
+    <td data-l="Catégorie">${esc(e.categorie)}</td>
+    <td data-l="Statut"><span class="tag ${e.statut === "payee" ? "ok" : "warn"}">${e.statut === "payee" ? "Payée" : "À payer"}</span></td>
+    <td data-l="Montant" class="num">${fc(e.montant)}</td>
+    <td data-l="Justificatif">${e.justificatif ? `📎 ${esc(e.justificatif)}` : `<span style="color:var(--ink-3)">—</span>`}</td>
+    <td class="act">${SESSION.perms.includes("finance.create") ? `<button class="btn danger sm" data-rev="${e.no}">Annuler</button>` : ""}</td></tr>`).join("");
+  const sel = $("#reg-dep");
+  sel.innerHTML = `<option value="">—</option>`;
+  rows.filter(e => e.statut === "a_payer").forEach(e => sel.insertAdjacentHTML("beforeend", `<option value="${e.no}">n° ${e.no} — ${esc(e.libelle)} (${fc(e.montant)})</option>`));
+  $$("#rd-tbl [data-rev]").forEach(b => b.addEventListener("click", async () => {
+    const motif = prompt("Motif de l'annulation de la dépense (RG-F3 : écriture inverse référencée) :") || "";
+    if (!motif) { toast("err", "Annulation abandonnée : un motif est nécessaire."); return; }
+    const rr = await SERVER.api({ endpoint: "finance.contrepasser", token: SESSION.token, body: { no: +b.dataset.rev, motif } });
+    toast(rr.status === 200 ? "ok" : "err", rr.msg.slice(0, 140));
+    renderRD();
+  }));
+}
+function draftNote(zoneId, confirmId, title, body, total) {
+  $(zoneId).innerHTML = `<div class="af-box"><b>${esc(title)}</b><div style="margin-top:7px">${body}</div>${total ? `<div class="af-total-row"><span>Flux trésorerie</span><span>${esc(total)}</span></div>` : ""}</div>`;
+  $(confirmId).style.display = "block";
+}
+async function previewDep() {
+  const b = { date: $("#dep-date").value, montant: Number($("#dep-montant").value), categorie: $("#dep-cat").value, libelle: $("#dep-lib").value.trim(), justificatif: $("#dep-just").value.trim(), statut: $("#dep-statut").value };
+  let ok = true;
+  [["f-dep-lib", b.libelle.length >= 3], ["f-dep-montant", b.montant > 0], ["f-dep-date", !!b.date], ["f-dep-cat", !!b.categorie]].forEach(([f, v]) => { $("#" + f).classList.toggle("err", !v); if (!v) ok = false; });
+  if (!ok) return;
+  DEP_DRAFT = b;
+  draftNote("#dep-preview-zone", "#dep-confirm-zone", b.libelle + " — " + fc(b.montant) + " (" + b.categorie + ")", `<div class="af-row"><span>Date</span><span>${b.date}</span></div><div class="af-row"><span>Statut</span><span>${b.statut === "payee" ? "Payée : sortie de trésorerie immédiate" : "À payer : dette, aucun flux tant que non réglée"}</span></div><div class="af-row"><span>Justificatif</span><span>${esc(b.justificatif || "aucun")}</span></div>`, b.statut === "payee" ? "−" + fc(b.montant) : "0 (dette)");
+  $("#dep-result").innerHTML = "";
+}
+async function confirmDep() {
+  if (!DEP_DRAFT) return;
+  const r = await SERVER.api({ endpoint: "finance.depense", token: SESSION.token, body: DEP_DRAFT });
+  $("#dep-result").innerHTML = `<div class="note ${r.status === 200 ? "ok" : "err"}"><span>${r.status === 200 ? "✓" : "⚠️"}</span><span><b>${esc(r.msg)}</b>${r.auditId ? ` (journal n° ${r.auditId})` : ""}</span></div>`;
+  if (r.status === 200) { toast("ok", r.msg.slice(0, 120)); DEP_DRAFT = null; $("#dep-confirm-zone").style.display = "none"; $("#dep-lib").value = ""; $("#dep-montant").value = ""; $("#dep-just").value = ""; $("#dep-preview-zone").innerHTML = ""; renderRD(); }
+  else toast("err", r.msg.slice(0, 120));
+}
+async function previewRec() {
+  const b = { date: SERVER.AUJ.date, montant: Number($("#rec-montant").value), mode: $("#rec-mode").value, ref: $("#rec-ref").value.trim(), source: $("#rec-src").value.trim() };
+  let ok = true;
+  [["f-rec-src", b.source.length >= 3], ["f-rec-montant", b.montant > 0], ["f-rec-ref", !!b.ref]].forEach(([f, v]) => { $("#" + f).classList.toggle("err", !v); if (!v) ok = false; });
+  if (!ok) return;
+  REC_DRAFT = b;
+  draftNote("#rec-preview-zone", "#rec-confirm-zone", b.source + " — " + fc(b.montant) + " (" + b.mode + ")", `<div class="af-row"><span>Reçu</span><span>${esc(b.ref)}</span></div>`, "+" + fc(b.montant));
+  $("#dep-result").innerHTML = "";
+}
+async function confirmRec() {
+  if (!REC_DRAFT) return;
+  const r = await SERVER.api({ endpoint: "finance.recette", token: SESSION.token, body: REC_DRAFT });
+  $("#dep-result").innerHTML = `<div class="note ${r.status === 200 ? "ok" : "err"}"><span>${r.status === 200 ? "✓" : "⚠️"}</span><span><b>${esc(r.msg)}</b></span></div>`;
+  if (r.status === 200) { toast("ok", r.msg.slice(0, 120)); REC_DRAFT = null; $("#rec-confirm-zone").style.display = "none"; $("#rec-src").value = ""; $("#rec-montant").value = ""; $("#rec-ref").value = ""; $("#rec-preview-zone").innerHTML = ""; }
+  else toast("err", r.msg.slice(0, 120));
+}
+async function previewReg() {
+  const b = { cible: Number($("#reg-dep").value), montant: Number($("#reg-montant").value), mode: $("#reg-mode").value, ref: $("#reg-ref").value.trim(), date: SERVER.AUJ.date };
+  let ok = true;
+  [["f-reg-dep", !!b.cible], ["f-reg-montant", b.montant > 0], ["f-reg-ref", !!b.ref]].forEach(([f, v]) => { $("#" + f).classList.toggle("err", !v); if (!v) ok = false; });
+  if (!ok) return;
+  REG_DRAFT = b;
+  const lib = $("#reg-dep").selectedOptions[0] ? $("#reg-dep").selectedOptions[0].textContent : "—";
+  draftNote("#reg-preview-zone", "#reg-confirm-zone", "Règlement — " + fc(b.montant), `<div class="af-row"><span>Dette</span><span>${esc(lib)}</span></div>`, "−" + fc(b.montant));
+  $("#reg-result").innerHTML = "";
+}
+async function confirmReg() {
+  if (!REG_DRAFT) return;
+  const r = await SERVER.api({ endpoint: "finance.regler_dette", token: SESSION.token, body: REG_DRAFT });
+  $("#reg-result").innerHTML = `<div class="note ${r.status === 200 ? "ok" : "err"}"><span>${r.status === 200 ? "✓" : "⚠️"}</span><span><b>${esc(r.msg)}</b></span></div>`;
+  if (r.status === 200) { toast("ok", r.msg.slice(0, 130)); REG_DRAFT = null; $("#reg-confirm-zone").style.display = "none"; $("#reg-montant").value = ""; $("#reg-ref").value = ""; $("#reg-preview-zone").innerHTML = ""; renderRD(); }
+  else toast("err", r.msg.slice(0, 130));
+}
+
+/* ── Trésorerie et états financiers ── */
+async function renderTreso() {
+  const r = await SERVER.api({ endpoint: "finance.suivi", token: SESSION.token, body: { annee: 2026 } });
+  if (r.status !== 200) return;
+  const et = r.data.etat;
+  $("#tk-solde").textContent = fc(et.solde);
+  $("#tk-enc").textContent = fc(et.cotisEncaissees + et.autresRecettes + et.penReglees);
+  $("#tk-dep").textContent = fc(Object.values(et.depensesCat).reduce((s, v) => s + v, 0));
+  $("#tk-creances").textContent = fc(et.creances);
+  $("#suivi-tbl tbody").innerHTML = r.data.rows.map(x => `<tr>
+    <td data-l="Mois"><b>${x.mois}</b>${x.futur ? ` <span class="tag neutral">à venir</span>` : ""}</td>
+    <td data-l="Dues" class="num">${fc(x.dues)}</td>
+    <td data-l="Encaissées" class="num">${fc(x.encaissees)}</td>
+    <td data-l="En attente" class="num" style="color:${x.attente ? "var(--warn)" : "var(--ok)"}">${fc(x.attente)}</td>
+    <td data-l="Taux"><span class="tag ${x.taux >= 90 ? "ok" : x.taux >= 70 ? "warn" : x.dues ? "bad" : "neutral"}">${x.dues ? x.taux + " %" : "—"}</span></td>
+    <td data-l="Pénalités constatées" class="num">${fc(x.penConstatees)}</td>
+    <td data-l="Flux du mois" class="num" style="color:${x.flux < 0 ? "var(--danger)" : x.flux > 0 ? "var(--ok)" : "inherit"}">${x.futur ? "—" : fc(x.flux)}</td></tr>`).join("");
+  const cats = Object.keys(et.depensesCat);
+  $("#etat-fin").innerHTML = `<dl class="dl">
+    <dt>Cotisations dues (obligations)</dt><dd><b>${fc(et.cotisDues)}</b></dd>
+    <dt>Cotisations encaissées</dt><dd><b style="color:var(--ok)">${fc(et.cotisEncaissees)}</b></dd>
+    <dt>Cotisations en attente</dt><dd><b style="color:${et.cotisDues - et.cotisEncaissees ? "var(--warn)" : "var(--ok)"}">${fc(et.cotisDues - et.cotisEncaissees)}</b></dd>
+    <dt>Pénalités constatées (dette)</dt><dd>${fc(et.penConstatees)}</dd>
+    <dt>Pénalités réellement encaissées</dt><dd>${fc(et.penReglees)}</dd>
+    <dt>Pénalités remises (RG-P3)</dt><dd>${fc(et.penRemises)}</dd>
+    <dt>Pénalités restantes dues</dt><dd><b>${fc(et.penConstatees - et.penReglees - et.penRemises)}</b></dd>
+    <dt>Autres recettes (dons, subventions)</dt><dd>${fc(et.autresRecettes)}</dd>
+    <dt>Dépenses payées par catégorie</dt><dd>${cats.length ? cats.map(c => esc(c) + " : " + fc(et.depensesCat[c])).join(" · ") : "aucune"}</dd>
+    <dt>Dépenses à payer (dettes)</dt><dd><b style="color:var(--warn)">${fc(et.depensesAPayer)}</b></dd>
+    <dt><b>Solde de trésorerie</b></dt><dd><b style="font-size:16px;color:var(--primary)">${fc(et.solde)}</b> — calculé uniquement sur les entrées et sorties réellement enregistrées</dd></dl>`;
+  const dc = await SERVER.api({ endpoint: "finance.recoveries", token: SESSION.token });
+  let dcRows = "";
+  dc.data.rows.filter(x => x.arrears > 0 || x.penalites > 0).forEach(x => { if (x.arrears) dcRows += `<tr><td data-l="Partie">${esc(x.nom + " " + x.prenom)} (${x.matricule})</td><td data-l="Nature">Cotisation due</td><td data-l="Montant" class="num">${fc(x.arrears)}</td><td data-l="Statut"><span class="tag warn">Ouverte</span></td></tr>`; if (x.penalites) dcRows += `<tr><td data-l="Partie">${esc(x.nom + " " + x.prenom)} (${x.matricule})</td><td data-l="Nature">Pénalité due (RG-P1)</td><td data-l="Montant" class="num">${fc(x.penalites)}</td><td data-l="Statut"><span class="tag warn">Ouverte</span></td></tr>`; });
+  dc.data.rows.filter(x => x.avance > 0).forEach(x => { dcRows += `<tr><td data-l="Partie">${esc(x.nom + " " + x.prenom)} (${x.matricule})</td><td data-l="Nature">Avance accordée</td><td data-l="Montant" class="num">${fc(x.avance)}</td><td data-l="Statut"><span class="tag info">Dette de l'association</span></td></tr>`; });
+  const deps = await SERVER.api({ endpoint: "finance.ledger", token: SESSION.token, body: { type: "depense" } });
+  const ann = new Set((await SERVER.api({ endpoint: "finance.ledger", token: SESSION.token, body: { type: "contrepassation" } })).data.map(e => e.cible));
+  const reg = (await SERVER.api({ endpoint: "finance.ledger", token: SESSION.token, body: { type: "reglement_dette" } })).data;
+  deps.data.filter(e => e.statut === "a_payer" && !ann.has(e.no)).forEach(e => { const paye = reg.filter(x => x.cible === e.no).reduce((s, x) => s + x.montant, 0); dcRows += `<tr><td data-l="Partie">Association — tiers</td><td data-l="Nature">Engagement d'un tiers (dépense à payer)</td><td data-l="Montant" class="num">${fc(e.montant - paye)}</td><td data-l="Statut"><span class="tag bad">Dette ouverte</span></td></tr>`; });
+  $("#dc-tbl tbody").innerHTML = dcRows || `<tr><td colspan="4" style="color:var(--ink-3)">Aucune dette ni créance ouverte.</td></tr>`;
+  $("#btn-rap-compare").onclick = () => {
+    const rel = Number($("#rap-rel").value);
+    if (!Number.isInteger(rel)) { $("#rap-result").innerHTML = `<div class="note err"><span>⚠️</span><span><b>Saisissez le solde réel des fonds (entier).</b></span></div>`; return; }
+    const ecart = rel - et.solde;
+    $("#rap-result").innerHTML = `<div class="note ${ecart === 0 ? "ok" : Math.abs(ecart) <= 500 ? "warn" : "err"}"><span>${ecart === 0 ? "✓" : "⚠️"}</span><span><b>Solde application : ${fc(et.solde)} · relevé : ${fc(rel)} · écart : ${ecart ? (ecart > 0 ? "+" : "") + fc(ecart) : "aucun"}</b>${ecart ? "<br>L'écart fait l'objet du rapprochement mensuel (RG-F5) : vérifiez les reçus non saisies ou les dépenses oubliées. Cette saisie n'est pas comptabilisée." : "<br>Aucun écart constaté — le rapprochement concorde."}</span></div>`;
+  };
+}
+async function exportEtat() {
+  const r = await SERVER.api({ endpoint: "finance.suivi", token: SESSION.token, body: { annee: 2026 } });
+  /* Neutralisation de l'injection de formules tableur (=, +, @, tabulation, RC). */
+  const safe = v => { const s = String(v == null ? "" : v); return (/^[=+@\t\r]/.test(s) || /^-[^0-9.]/.test(s)) ? "'" + s : s; };
+  const q = v => `"${safe(v).replace(/"/g, `""`)}"`;
+  const lines = ["Mois;Cotisations dues (FCFA);Encaissées (FCFA);En attente (FCFA);Taux (%);Pénalités constatées (FCFA);Flux du mois (FCFA)"]
+    .concat(r.data.rows.map(x => [x.mois, x.dues, x.encaissees, x.attente, x.taux, x.penConstatees, x.flux].map(q).join(";")));
+  const et = r.data.etat;
+  lines.push("", `"Solde de trésorerie";${q(et.solde)}`, `"Cotisations dues";${q(et.cotisDues)}`, `"Cotisations encaissées";${q(et.cotisEncaissees)}`, `"Pénalités constatées (dette)";${q(et.penConstatees)}`, `"Pénalités encaissées";${q(et.penReglees)}`, `"Pénalités remises";${q(et.penRemises)}`, `"Autres recettes";${q(et.autresRecettes)}`, `"Créances membres";${q(et.creances)}`, `"Dettes (avances + dépenses à payer)";${q(et.dettes)}`);
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "adl-ci_etat_financier_2026.csv"; a.click();
+  toast("ok", "État financier exporté (tableur).");
+}
+
+/* ── Paramètres (RG-C1) ── */
+async function renderParam() {
+  const r = await SERVER.api({ endpoint: "params.get", token: SESSION.token });
+  if (r.status !== 200) return;
+  const rows = [];
+  r.data.cotisation.forEach(v => rows.push(["Cotisation mensuelle", fc(v.montant), v.depuis, v.origine]));
+  r.data.penalite.forEach(v => rows.push(["Pénalité mensuelle de retard", fc(v.montant), v.depuis, v.origine]));
+  $("#param-tbl tbody").innerHTML = rows.map(x => `<tr><td data-l="Paramètre"><b>${esc(x[0])}</b></td><td data-l="Montant" class="num">${esc(x[1])}</td><td data-l="Effet depuis">${esc(x[2])}</td><td data-l="Origine">${esc(x[3])}</td></tr>`).join("");
+  $("#par-depuis").min = SERVER.AUJ.mois.slice(0, 4) + "-" + String(Number(SERVER.AUJ.mois.slice(5)) + 1).padStart(2, "0");
+  $("#btn-par-set").onclick = async () => {
+    const body = { type: $("#par-type").value, montant: Number($("#par-montant").value), depuis: $("#par-depuis").value, motif: $("#par-motif").value.trim() };
+    const rr = await SERVER.api({ endpoint: "params.set", token: SESSION.token, body });
+    $("#par-result").innerHTML = `<div class="note ${rr.status === 200 ? "ok" : "err"}"><span>${rr.status === 200 ? "✓" : "⚠️"}</span><span><b>${esc(rr.msg)}</b>${rr.auditId ? ` (journal n° ${rr.auditId})` : ""}</span></div>`;
+    if (rr.status === 200) { toast("ok", "Paramètre modifié (tracé au journal d'audit)."); renderParam(); }
+    else toast("err", rr.msg.slice(0, 120));
+  };
+}
+
+/* ── Banc, intrusion, archi ── */
+function renderBench(out, pass, total, ms) {
+  $("#bs-total").textContent = total; $("#bs-pass").textContent = pass; $("#bs-fail").textContent = total - pass; $("#bs-time").textContent = ms + " ms";
+  const GROUPS = { 1: "G1 — Identification : à jour, en retard, arriérés, pénalités", 2: "G2 — Encaissements : complet, partiel, avance, pénalités, anti-doublon", 3: "G3 — Recettes, dépenses, dettes, suivi et trésorerie", 4: "G4 — Corrections autorisées, justifiées, traçables", 5: "G5 — États financiers, créances/dettes, sécurité" };
+  let html = "";
+  for (const g of [1, 2, 3, 4, 5]) {
+    html += `<div class="grp-h">${GROUPS[g]}</div>`;
+    for (const sc of out.filter(x => x.g === g)) {
+      html += `<details class="sc"><summary><span class="verdict ${sc.pass ? "p" : "f"}">${sc.pass ? "✓ PASS" : "✗ ÉCART"}</span><b>${sc.id} · ${esc(sc.titre)}</b></summary>
+        <div class="body"><b>Attendu :</b> ${esc(sc.attendu)}<br><b>Obtenu :</b> ${esc(sc.obtenu)}${sc.detail ? `<br>${esc(sc.detail)}` : ""}</div></details>`;
+    }
+  }
+  html += `<div class="note ${pass === total ? "ok" : "err"}" style="margin-top:14px"><span>${pass === total ? "✓" : "⚠️"}</span><span><b>${pass === total ? "Suite complète conforme : " + pass + "/" + total + " scénarios — chaque calcul a été confronté à un recalcul indépendant depuis le journal brut." : pass + "/" + total + " scénarios conformes — examinez les écarts."}</b> Les données fictives ont été réinitialisées après l'exécution.</span></div>`;
+  $("#bench-results").innerHTML = html;
+}
+function renderAttacks() {
+  $("#attacks").innerHTML = ATTACKS.map((a, i) => `<div class="attack"><div class="desc"><b>${i + 1} · ${esc(a.t)}</b><small>${esc(a.d)}</small></div><button class="btn danger sm" data-atk="${i}">Lancer l'attaque</button></div>`).join("");
+  $$("#attacks [data-atk]").forEach(b => b.addEventListener("click", async () => {
+    const a = ATTACKS[+b.dataset.atk];
+    const r = await a.run();
+    const cls = r.status >= 500 ? "g" : r.status >= 400 ? "r" : "k";
+    $("#console-out").innerHTML += `\n\n<span class="g">» ${esc(a.t)}</span>\n<span class="${cls}">HTTP ${r.status} · ${esc(r.code)}</span>\n<span class="k">Serveur :</span> ${esc(r.msg)}${r.auditId ? `\n<span class="g">Journal :</span> entrée n° ${r.auditId}` : ""}`;
+    $("#console-out").scrollTop = 1e9;
+    toast(r.status >= 400 ? "ok" : "warn", r.status >= 400 ? `Refus du serveur (HTTP ${r.status}) — journal n° ${r.auditId}.` : `Réponse reçue (HTTP ${r.status}).`);
+  }));
+}
+function renderArchi() {
+  const REGLES = [
+    ["D3 · RG-P1", "Pénalité de 500 FCFA par mois de cotisation impayée au-delà du 10 ; calcul automatique le 11 ; la pénalité d'un mois est unique (pas de cumul sur le même mois)", "Constat automatique en écriture de dette (flux nul) dès qu'un mois actif est échoué impayé ; une écriture au plus par membre et par mois"],
+    ["RG-P2", "La pénalité cesse de courir dès le règlement du mois concerné", "Aucun nouveau constat pour un mois réglé ; un constat déjà créé reste dû jusqu'à règlement ou remise"],
+    ["RG-P3", "Le bureau peut remettre tout ou partie d'une pénalité par décision tracée", "Remise = contre-passation du constat avec la référence de la décision exigée dans le motif ; le constat reste visible"],
+    ["RG-C1", "Cotisation de 1 000 FCFA par membre actif ; paramétrable ; effet au mois suivant sans rétroactivité", "Paramètres versionnés avec mois d'effet ; les obligations ne courent que pendant l'activité ; écritures déjà constatées conservent leur montant"],
+    ["RG-C2", "Cotisation du mois M due au plus tard le 10 du mois M ; passé le 10, mois M « en retard »", "Un mois actif impayé à la date de démonstration (19/11) est en retard, y compris le mois courant"],
+    ["RG-C3", "Imputation mois par mois : cotisation du mois ancien, puis sa pénalité, puis mois suivant ; l'écran affiche cet ordre avant confirmation", "computeAffectation + écran de prévisualisation obligatoire avant l'enregistrement (RG-F2)"],
+    ["RG-F1 · D6", "Seul le trésorier saisit des opérations financières", "Permission finance.create vérifiée à chaque appel : paiement, dépense, recette, règlement, contre-passation"],
+    ["RG-F2", "Toute opération est confirmée en deux étapes", "Saisie puis résumé avec imputation à confirmer explicitement (paiement, dépense, recette, règlement)"],
+    ["RG-F3", "Aucune suppression ; correction par contre-passation référencée", "Endpoint de suppression inexistant ; contre-passation = écriture inverse qui référence l'origine ; les deux restent visibles"],
+    ["RG-F4", "Date, type, catégorie, montant, libellé obligatoires ; justificatif facultatif", "Validations serveur ; justificatif unique si fourni ; signalé dans les listes"],
+    ["RG-F5", "Rapprochement mensuel du solde avec les fonds réels", "Écran de rapprochement (trésorier et président) : écart affiché, saisie non comptabilisée"],
+    ["RG-D1 · RG-D2", "Dettes et créances avec nature ; règlement enregistré comme opération liée", "Créances : cotisations dues + pénalités dues ; dettes : avances accordées + dépenses à payer ; règlement = écriture liée à la dette"],
+    ["Demande du bureau", "Distinguer les montants dus des encaissés ; une pénalité calculée n'est pas une recette ; solde calculé sur les flux réels", "État financier séparant dû / encaissé / remis ; constats à flux nul ; trésorerie = Σ flux signés des écritures réelles"]
+  ];
+  $("#regles-body").innerHTML = REGLES.map(x => `<tr><td data-l="Réf."><b>${esc(x[0])}</b></td><td data-l="Règle">${esc(x[1])}</td><td data-l="Implémentation">${esc(x[2])}</td></tr>`).join("");
+  const PROPOS = [
+    ["V1", "Ordre d'affectation des avances (RG-C3 ne couvre que les échéances en retard et courantes)", "Après les échéances, l'excédent va aux mois futurs consécutifs (2026-12 puis 2027-01…)", "Valider l'ordre proposé"],
+    ["V2", "Plafond d'avance non précisé", "Aucun mois payable au-delà de 24 mois futurs ; surplus refusé (422)", "Valider ou fixer un plafond métier"],
+    ["V3", "Moyen de prévenir les doubles enregistrements non précisé", "Référence de reçu unique et obligatoire pour tout encaissement, recette et règlement ; justificatif de dépense unique si fourni", "Valider la règle anti-doublon"],
+    ["V4", "Qui peut modifier les paramètres (cotisation, pénalité) n'est pas précisé", "Rôle administrateur ; référence de décision exigée ; effet au mois suivant (RG-C1)", "Valider le détenteur du droit"],
+    ["V5", "Catégories de dépenses non listées dans le dossier", "Fonctionnement, Événements, Solidarité, Investissement, Divers", "Valider ou amender la nomenclature"],
+    ["V6", "Définition de « membre à jour » non explicitée", "À jour = aucune cotisation due non réglée et aucune pénalité due (les avances n'entrent pas)", "Valider la définition retenue"],
+    ["V7", "Qui saisit la remise de pénalité (RG-P3 dit « le bureau décide », RG-F1 dit que le trésorier saisit)", "Le trésorier saisit la remise avec la référence de la décision du bureau dans le motif", "Valider la procédure"],
+    ["V8", "La dette fournisseur (« dépense à payer ») n'est pas explicitement décrite", "Dépense enregistrée payée ou à payer ; règlement = opération liée (RG-D2) ; dettes suivies et réglées sans jamais effacer l'écriture", "Valider le traitement des dettes fournisseurs"],
+    ["V9", "Solde d'ouverture de trésorerie non précisé", "La trésorerie démarre à zéro au début du journal ; si l'association détient des fonds antérieurs, une écriture d'ouverture sera nécessaire", "Décider d'une écriture d'ouverture"],
+    ["V10", "Promesses de contribution et engagements de tiers (RG-D1) : aucun écran demandé", "Hors périmètre v2 ; les natures « cotisation due », « pénalité due » et « avance accordée » sont couvertes", "Confirmer le périmètre v2.1"]
+  ];
+  $("#valider-body").innerHTML = PROPOS.map(x => `<tr><td data-l="#"><b>${x[0]}</b></td><td data-l="Point non précisé">${esc(x[1])}</td><td data-l="Proposition">${esc(x[2])}</td><td data-l="Demande"><span class="badge-v">${esc(x[3])}</span></td></tr>`).join("");
+  const MAP = [
+    ["Imputation RG-C3 calculée et affichée avant confirmation", "Fonction d'imputation côté serveur (route /payments/preview) + confirmation explicite", "Validation serveur obligatoire"],
+    ["Constat de pénalité automatique (RG-P1)", "Job planifié PostgreSQL le 11 à minuit + constat idempotent (une écriture par membre/mois)", "UNIQUE (member, mois) sur les constats"],
+    ["Journal immuable, contre-passation référencée", "Table ledger INSERT-only + déclencheur anti-UPDATE/DELETE", "REVOKE UPDATE/DELETE"],
+    ["Référence de reçu unique (anti-doublon)", "Index d'unicité sur la référence de reçu", "UNIQUE NOT NULL"],
+    ["Paramètres versionnés avec mois d'effet", "Table parametres versionnée ; lecture du montant applicable par mois", "Historique conservé"],
+    ["Permissions financières par appel", "Middleware requirePerm() ; saisie au trésorier (D6)", "Aucune route sans middleware"],
+    ["Trésorerie recalculée des flux réels", "Vue matérialisée des flux signés recalculée à l'écriture", "Aucun chiffre saisi à la main"],
+    ["Journal d'audit chaîné SHA-256", "Table audit append-only + export mensuel hors système", "REVOKE UPDATE/DELETE sur audit_log"]
+  ];
+  $("#map-body").innerHTML = MAP.map(x => `<tr><td data-l="Prototype">${esc(x[0])}</td><td data-l="Production">${esc(x[1])}</td><td data-l="Verrou">${esc(x[2])}</td></tr>`).join("");
+  const FLAWS = [
+    ["1", "Le « serveur » vit dans le navigateur : la séparation client-serveur est une simulation fidèle mais non opposable hors du navigateur.", "Serveur distant Node.js + Express (AT-1) ; le prototype reste la spécification de référence."],
+    ["2", "Le constat des pénalités s'effectue à la lecture plutôt qu'à minuit le 11 : l'effet comptable est identique, l'horodatage diffère.", "Job planifié quotidien ; en production le constat est daté du 11 à minuit."],
+    ["3", "Le Mobile Money n'est pas vérifié (règle validée du bureau) : la référence de transaction est déclarative.", "Rapprochement mensuel RG-F5 avec le relevé de l'opérateur ; interfacement ultérieur hors périmètre."],
+    ["4", "Le rapprochement RG-F5 n'enregistre pas l'écart : il ne fait que l'afficher.", "En production : fiche de rapprochement mensuelle archivée et signée par le trésorier et le président."],
+    ["5", "Les promesses de contribution et engagements de tiers (RG-D1) n'ont pas d'écran dans cette version.", "V2.1 après validation du périmètre par le bureau."],
+    ["6", "Le registre des membres est embarqué dans le prototype ; en production il est partagé avec le module membres validé (pièce 6f).", "Base PostgreSQL unique ; la date de désactivation provient du module membres."]
+  ];
+  $("#flaws-body").innerHTML = FLAWS.map(x => `<tr><td data-l="#">${x[0]}</td><td data-l="Constat">${esc(x[1])}</td><td data-l="Traitement">${esc(x[2])}</td></tr>`).join("");
+}
+
+/* ── Connexion / déconnexion ── */
+function lgErr(msg) { $("#lg-err-txt").textContent = msg; $("#lg-err").classList.add("on"); }
+$("#login-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("#lg-err").classList.remove("on");
+  const u = $("#lg-user").value.trim(), p = $("#lg-pass").value;
+  if (!u) { $("#f-lg-user").classList.add("err"); return; }
+  if (!p) { $("#f-lg-pass").classList.add("err"); return; }
+  const b = $("#lg-submit"); b.classList.add("busy"); b.disabled = true;
+  const r = await SERVER.api({ endpoint: "auth.login", body: { user: u, pass: p } });
+  b.classList.remove("busy"); b.disabled = false;
+  if (r.status !== 200) { lgErr(r.msg); return; }
+  SESSION = { token: r.data.token, user: r.data.user, perms: r.data.perms };
+  $("#top-who").style.display = "flex";
+  $("#top-name").textContent = SESSION.user.nom; $("#top-role").textContent = SESSION.user.roleLabel; $("#top-ava").textContent = initials(SESSION.user.nom);
+  $("#v-login").classList.remove("on"); $("#v-appzone").style.display = "block";
+  $("#lg-pass").value = "";
+  COTIS = { rows: [], tot: null, members: [] };
+  buildNav();
+  toast("ok", r.msg);
+});
+async function doLogout(expired, silent) {
+  if (SESSION.token && !expired) await SERVER.api({ endpoint: "auth.logout", token: SESSION.token });
+  SESSION = { token: null, user: null, perms: [] };
+  $("#top-who").style.display = "none"; $("#v-appzone").style.display = "none"; $("#v-login").classList.add("on");
+  buildNav();
+  if (!silent) toast("info", expired ? "Votre session a expiré — reconnectez-vous." : "Session fermée. À bientôt !");
+}
+$("#btn-logout").addEventListener("click", () => doLogout(false));
+$("#btn-pay-open").addEventListener("click", () => { $("#panel-pay").style.display = "block"; $("#btn-pay-open").style.display = "none"; });
+$("#btn-pay-close").addEventListener("click", () => { $("#panel-pay").style.display = "none"; $("#btn-pay-open").style.display = ""; });
+$("#btn-pay-preview").addEventListener("click", previewPay);
+$("#btn-pay-confirm").addEventListener("click", confirmPay);
+$("#btn-dep-confirm").addEventListener("click", confirmDep);
+$("#btn-rec-confirm").addEventListener("click", confirmRec);
+$("#btn-reg-confirm").addEventListener("click", confirmReg);
+$("#dep-montant").addEventListener("input", () => { $("#dep-preview-zone").innerHTML = ""; $("#dep-confirm-zone").style.display = "none"; });
+$("#rec-montant").addEventListener("input", () => { $("#rec-preview-zone").innerHTML = ""; $("#rec-confirm-zone").style.display = "none"; });
+$("#reg-montant").addEventListener("input", () => { $("#reg-preview-zone").innerHTML = ""; $("#reg-confirm-zone").style.display = "none"; });
+$("#btn-export-fin").addEventListener("click", exportEtat);
+$("#btn-export-etat").addEventListener("click", exportEtat);
+$("#btn-sit-back").addEventListener("click", () => showTabTab(SIT_BACK));
+$("#fin-q").addEventListener("input", () => { clearTimeout(window.__ft); window.__ft = setTimeout(drawCotisTable, 300); });
+$("#fin-tribu").addEventListener("change", drawCotisTable);
+$("#fin-dus").addEventListener("change", drawCotisTable);
+["jl-mat", "jl-type", "jl-mois"].forEach(id => $("#" + id).addEventListener("change", renderJournal));
+$("#btn-bench-run").addEventListener("click", () => { $("#bench-results").innerHTML = `<div class="note info"><span>⏳</span><span>Suite en cours — quelques secondes (dérivations PBKDF2 et recalculs inclus)…</span></div>`; setTimeout(runBench, 50); });
+$("#btn-bench-export").addEventListener("click", () => {
+  if (!BENCH_RESULTS.length) { toast("err", "Lancez d'abord la suite de tests."); return; }
+  const blob = new Blob([JSON.stringify(BENCH_RESULTS, null, 2)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "adl-ci_tests_finances_comptabilite_v2.json"; a.click();
+});
+$("#btn-console-clear").addEventListener("click", () => { $("#console-out").textContent = "Console effacée."; });
+
+/* ── Amorçage ── */
+(async () => {
+  await SERVER.seed();
+  SERVER.TRIBUS_LOCAL = ["Douayêro", "Mariabêh", "Abouyabêh", "Aliyabêh", "Simbayabêh", "Djigayabêh"];
+  buildNav();
+  showTab("login");
+  renderAttacks(); renderArchi();
+})();
+
+</script>
+
+</body>
+</html>

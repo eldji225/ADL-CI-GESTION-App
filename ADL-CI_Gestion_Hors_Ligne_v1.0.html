@@ -1,0 +1,1362 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADL-CI GESTION — Fonctionnement hors ligne (prototype v1.0)</title>
+<style>
+:root{
+  --bg:#F6F3EC; --bg-soft:#EFEAE0; --bg-deep:#E7E1D3;
+  --primary:#2A4A3A; --primary-deep:#1D362B; --primary-soft:#3D6B54;
+  --accent:#C89F62; --accent-soft:#E9DBBE; --accent-faint:#F3ECD9;
+  --ink:#1C1B18; --ink-2:#4A473F; --ink-3:#7A7466;
+  --card:#FFFFFF; --line:#DCD5C6; --line-soft:#E8E2D4;
+  --ok:#2F7D4F; --ok-bg:#E6F1E9; --warn:#B97E1C; --warn-bg:#F7EEDC;
+  --danger:#A63D2F; --danger-bg:#F5E5E1; --info:#3E6C8E; --info-bg:#E4EDF3;
+  --shadow:0 1px 2px rgba(28,27,24,.06),0 4px 14px rgba(28,27,24,.08);
+  --shadow-lg:0 8px 30px rgba(28,27,24,.16);
+  --r:14px; --r-sm:10px;
+  --f-title:'Lora',Georgia,serif; --f-ui:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --f-num:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-ui);font-size:15px;line-height:1.55}
+.wrap{max-width:1180px;margin:0 auto;padding:0 16px}
+header.hero{background:linear-gradient(160deg,var(--primary-deep),var(--primary));color:#fff;padding:clamp(24px,5vw,44px) 0 20px}
+header.hero h1{font-family:var(--f-title);font-size:clamp(1.5rem,4.5vw,2.3rem);margin:0 0 6px;font-weight:600}
+header.hero p{margin:0;color:#DCE7DF;font-size:clamp(.85rem,2vw,1rem)}
+.hero-tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.hero-tags span{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);border-radius:999px;padding:3px 12px;font-size:.75rem}
+.bandeau{position:sticky;top:0;z-index:50;border-bottom:1px solid var(--line);background:var(--card)}
+.bandeau-in{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 0}
+.etat-reseau{display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:.85rem;border-radius:999px;padding:6px 14px}
+.point{width:9px;height:9px;border-radius:50%;background:currentColor}
+.en-ligne{background:var(--ok-bg);color:var(--ok)}
+.hors-ligne{background:var(--warn-bg);color:var(--warn)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:8px 16px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-weight:600;cursor:pointer}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.btn.accent{background:var(--accent);border-color:var(--accent);color:#221A0D}
+.btn.danger{background:var(--danger);border-color:var(--danger);color:#fff}
+.btn.small{min-height:34px;padding:4px 12px;font-size:.8rem}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+main{padding:20px 0 40px;display:grid;grid-template-columns:minmax(0,1fr);gap:18px}
+.card{min-width:0;background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px 18px}
+.card h2{font-family:var(--f-title);font-size:1.15rem;margin:0 0 4px;color:var(--primary-deep)}
+.card .note{color:var(--ink-3);font-size:.8rem;margin:0 0 12px}
+.col2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+@media(max-width:900px){.col2{grid-template-columns:1fr}}
+.scroll-x{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+th{background:var(--bg-soft);color:var(--ink-2);text-align:left;padding:7px 9px;border-bottom:2px solid var(--line);white-space:nowrap}
+td{padding:7px 9px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+td.num,th.num{text-align:right;font-family:var(--f-num);white-space:nowrap}
+.badge{display:inline-block;border-radius:999px;padding:2px 10px;font-size:.72rem;font-weight:600;white-space:nowrap}
+.b-attente{background:var(--warn-bg);color:var(--warn)}
+.b-valide{background:var(--ok-bg);color:var(--ok)}
+.b-rejete{background:var(--danger-bg);color:var(--danger)}
+.b-conflit{background:var(--info-bg);color:var(--info)}
+.b-neutre{background:var(--bg-deep);color:var(--ink-2)}
+.b-annule{background:var(--bg-deep);color:var(--ink-3);text-decoration:line-through}
+.totaux{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:10px 0 14px}
+.totaux .t{border:1px solid var(--line-soft);border-radius:var(--r-sm);padding:10px 12px;background:var(--bg)}
+.totaux .t b{display:block;font-family:var(--f-num);font-size:1.15rem;margin-top:2px}
+.totaux .t span{font-size:.72rem;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em}
+.t-confirme{border-left:4px solid var(--ok)}
+.t-attente{border-left:4px solid var(--warn)}
+.t-provisoire{border-left:4px solid var(--info)}
+form.saisie{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;align-items:end;margin-top:12px}
+label{display:block;font-size:.75rem;color:var(--ink-2);margin-bottom:3px;font-weight:600}
+input,select{width:100%;min-height:44px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;background:#fff}
+.appareils{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}
+@media(max-width:700px){.appareils{grid-template-columns:1fr}}
+.appareil{border:2px solid var(--line);border-radius:var(--r);padding:12px 14px;cursor:pointer;background:var(--bg)}
+.appareil.actif{border-color:var(--primary);background:var(--accent-faint);box-shadow:var(--shadow)}
+.appareil b{display:block}
+.appareil small{color:var(--ink-3)}
+.cartes-mini{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.mini{border:1px solid var(--line-soft);border-radius:var(--r-sm);padding:10px 12px;background:var(--bg)}
+.mini span{font-size:.72rem;color:var(--ink-3);text-transform:uppercase;letter-spacing:.04em}
+.mini b{display:block;font-family:var(--f-num);font-size:1.05rem;margin-top:2px}
+.log{list-style:none;margin:0;padding:0;font-size:.8rem;max-height:260px;overflow-y:auto}
+.log li{padding:5px 8px;border-bottom:1px dashed var(--line-soft)}
+.log .t{color:var(--ink-3);font-family:var(--f-num);margin-right:8px}
+.log .alerte{color:var(--danger)}
+.log .succes{color:var(--ok)}
+.log .info{color:var(--info)}
+details.spec{border:1px solid var(--line-soft);border-radius:var(--r-sm);margin-bottom:8px;background:var(--bg)}
+details.spec summary{cursor:pointer;padding:10px 14px;font-weight:600;color:var(--primary-deep)}
+details.spec .contenu{padding:0 14px 12px;font-size:.85rem;color:var(--ink-2)}
+.v-ok{color:var(--ok);font-weight:600}
+.v-ko{color:var(--danger);font-weight:600}
+#intrusionOut div{font-family:var(--f-num);font-size:.78rem;padding:4px 0;border-bottom:1px dashed var(--line-soft)}
+.statut-cell{white-space:nowrap}
+.conflit-box{border:1px solid var(--info);background:var(--info-bg);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:10px;font-size:.85rem}
+.grille-verdicts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+footer{background:var(--primary-deep);color:#C9D6CD;padding:22px 0;font-size:.8rem}
+footer a{color:var(--accent-soft)}
+.alerte-locale{background:var(--danger-bg);color:var(--danger);border-radius:var(--r-sm);padding:8px 12px;font-size:.82rem;margin-top:10px;display:none}
+code{font-family:var(--f-num);font-size:.78em;background:var(--bg-deep);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>ADL-CI GESTION — Fonctionnement hors ligne</h1>
+    <p>Pièce 6k · Prototype démonstratif du mécanisme de synchronisation hors ligne (PWA) — proposition soumise à la validation du bureau</p>
+    <div class="hero-tags">
+      <span>Décisions S1–S12</span><span>8 règles absolues R1–R8</span><span>Banc de 9 scénarios · 60 vérifications</span><span>Test jumelé Python + JavaScript</span>
+    </div>
+  </div>
+</header>
+
+<div class="bandeau"><div class="wrap bandeau-in">
+  <span class="etat-reseau en-ligne" id="etatReseau"><span class="point"></span><span id="txtReseau">En ligne</span></span>
+  <span id="txtAttente" class="badge b-neutre">—</span>
+  <span style="flex:1"></span>
+  <button class="btn danger small" id="btnReseau" onclick="basculerReseau()">Couper le réseau</button>
+  <button class="btn primary small" onclick="syncMaintenant()">Synchroniser cet appareil</button>
+</div></div>
+
+<main class="wrap">
+
+  <section class="card" id="secAppareils">
+    <h2>1 · Appareils autorisés</h2>
+    <p class="note">Trois appareils partagent le même serveur et le même réseau — comme trois membres du bureau. Sélectionnez un appareil pour agir avec ; chaque appareil possède son propre cache, sa propre file d'attente et son propre snapshot de permissions.</p>
+    <div class="appareils" id="listeAppareils"></div>
+    <div class="cartes-mini" id="cartesAppareil"></div>
+  </section>
+
+  <div class="col2">
+    <section class="card">
+      <h2>2 · Cotisations (module financier)</h2>
+      <p class="note">Les données affichées sont celles synchronisées et autorisées pour l'appareil actif. Une saisie hors ligne reste « en attente — NON validé » jusqu'à la confirmation du serveur (règle R3).</p>
+      <div class="totaux">
+        <div class="t t-confirme"><span>Total confirmé</span><b id="tConf">—</b></div>
+        <div class="t t-attente"><span>En attente de synchro</span><b id="tAttente">—</b></div>
+        <div class="t t-provisoire"><span>Provisoire (affiché à part)</span><b id="tProv">—</b></div>
+      </div>
+      <div class="scroll-x"><table id="tabPaiements"></table></div>
+      <form class="saisie" onsubmit="return saisirPaiement(event)">
+        <div><label>Membre</label><select id="fMembre"></select></div>
+        <div><label>Motif</label><select id="fMotif"><option value="tranche">Tranche</option><option value="solde">Solde</option></select></div>
+        <div><label>Période (AAAA-MM)</label><input id="fPeriode" value="2026-11" inputmode="numeric"></div>
+        <div><label>Montant (FCFA)</label><input id="fMontant" type="number" value="4500" min="1" step="1"></div>
+        <div><button class="btn primary" type="submit" id="btnPaiement">Enregistrer</button></div>
+      </form>
+      <div class="alerte-locale" id="alertePaiement"></div>
+    </section>
+
+    <section class="card">
+      <h2>3 · Réunion ordinaire du 15 (feuille de présence)</h2>
+      <p class="note">Réunion R-2026-11-15 — quatre statuts validés (présent, absent, excusé, non concerné). Unicité garantie par le serveur : une seconde participation du même membre est rejetée (DOUBLON_PARTICIPATION), même saisie depuis deux appareils.</p>
+      <div class="scroll-x"><table id="tabPresence"></table></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>4 · Fiches membres (risque de conflit entre appareils)</h2>
+    <p class="note">Modifiez téléphone ou quartier depuis deux appareils différents sans réseau : le second est reconnu obsolète par le verrou optimiste (VERSION_OBSOLETE) — jamais d'écrasement silencieux (R4, R5). Seul l'administrateur peut arbitrer.</p>
+    <div class="scroll-x"><table id="tabMembres"></table></div>
+    <div class="alerte-locale" id="alerteMembre"></div>
+  </section>
+
+  <div class="col2">
+    <section class="card">
+      <h2>5 · File d'attente de l'appareil (outbox)</h2>
+      <p class="note">Chaque opération porte un identifiant unique (R1) et traverse les états : en attente → envoyé (résultat inconnu) → validé / rejeté / conflit. Une opération en conflit n'est jamais renvoyée automatiquement.</p>
+      <div class="scroll-x"><table id="tabOutbox"></table></div>
+    </section>
+
+    <section class="card">
+      <h2>6 · Centre de conflits de l'appareil</h2>
+      <p class="note">Le conflit est signalé, la proposition conservée intacte, la décision requise. Arbitrage réservé au rôle administrateur (R8) : la fusion est enregistrée sur la version serveur connue.</p>
+      <div id="listeConflits"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>7 · Journal des opérations du serveur (preuve d'idempotence)</h2>
+    <p class="note">Contrainte UNIQUE sur l'identifiant d'opération : un même op_id n'a jamais deux verdicts, un double envoi renvoie le verdict d'origine (⚑ replay) sans réappliquer (R1, R2). C'est le garde-fou qui rend les doubles synchronisations inoffensives.</p>
+    <div class="cartes-mini" id="cartesJournal" style="margin-bottom:12px"></div>
+    <div class="scroll-x"><table id="tabJournal"></table></div>
+  </section>
+
+  <section class="card">
+    <h2>8 · Journal de démonstration</h2>
+    <p class="note">Traçage des actions exécutées dans le prototype : coupures, saisies, synchronisations, verdicts.</p>
+    <ul class="log" id="logDemo"></ul>
+  </section>
+
+  <section class="card">
+    <h2>9 · Banc de tests intégré — 9 scénarios, 60 vérifications</h2>
+    <p class="note">Le jumeau JavaScript du banc Python archivé exécute les 9 scénarios dans des mondes de test séparés (l'état de la démonstration n'est pas touché). Auto-vérification du hachage inclus.</p>
+    <button class="btn primary" onclick="executerBanc()">Exécuter les 9 scénarios</button>
+    <span id="bancDuree" style="margin-left:10px;color:var(--ink-3);font-size:.8rem"></span>
+    <div id="bancOut" style="margin-top:12px"></div>
+  </section>
+
+  <section class="card">
+    <h2>10 · Console d'intrusion — 5 essais</h2>
+    <p class="note">Tentatives d'abus exécutées sur des mondes de test séparés : chaque essai doit être refusé ou neutralisé.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      <button class="btn small" onclick="intrusion(1)">I1 · Paiement par un membre ordinaire</button>
+      <button class="btn small" onclick="intrusion(2)">I2 · Double écriture serveur</button>
+      <button class="btn small" onclick="intrusion(3)">I3 · Falsification du cache</button>
+      <button class="btn small" onclick="intrusion(4)">I4 · Arbitrage par un secrétaire</button>
+      <button class="btn small" onclick="intrusion(5)">I5 · Montant négatif forcé</button>
+      <button class="btn small" onclick="document.getElementById('intrusionOut').innerHTML=''">Effacer</button>
+    </div>
+    <div id="intrusionOut" style="margin-top:12px"></div>
+  </section>
+
+  <section class="card">
+    <h2>11 · Spécification S1–S12 (à valider)</h2>
+    <p class="note">Chaque décision est mise en œuvre dans ce prototype et prouvée par le banc. Les décisions se valident ensemble ; les choix ouverts E1–E3 sont en bas de page.</p>
+    <details class="spec"><summary>S1 · Périmètre et stockage local</summary><div class="contenu">Stockage local IndexedDB (couches Dexie en production) avec quatre tables : <code>cache_donnees</code> (copie de travail limitée au périmètre autorisé du rôle), <code>file_operations</code> (outbox), <code>meta_synchro</code> (dernier contact, snapshot de permissions, séquence locale), <code>conflits_locaux</code>. Règle structurelle : la saisie hors ligne ne modifie jamais le cache des entités — elle crée une opération en attente. Le cache n'est modifié que par la vérité serveur (confirmation ou tirage des nouveautés).</div></details>
+    <details class="spec"><summary>S2 · Identifiant unique d'opération (R1)</summary><div class="contenu">Toute opération hors ligne porte un <code>op_id</code> UUIDv4 généré par l'appareil au moment de la saisie, immuable et jamais réutilisé. Triple traçabilité : op_id (opération), identité d'appareil, séquence locale croissante (ordre FIFO d'envoi).</div></details>
+    <details class="spec"><summary>S3 · Cycle de vie et affichage (R3)</summary><div class="contenu">Six états : <b>en attente</b> → <b>envoyé, résultat inconnu</b> → <b>validé</b> / <b>rejeté</b> / <b>conflit</b>, plus <b>annulé localement</b>. Une opération non confirmée n'est jamais présentée comme validée (badge ambré distinct, mention « NON validé »). Les totaux financiers affichent trois lignes séparées : confirmé, en attente, provisoire — le provisoire n'est jamais fusionné dans les chiffres comptables.</div></details>
+    <details class="spec"><summary>S4 · Idempotence serveur (R2)</summary><div class="contenu">Le serveur tient <code>journal_operations</code> avec contrainte UNIQUE sur <code>op_id</code>. Tout envoi d'un op_id déjà connu renvoie le verdict d'origine avec l'indicateur « replay », sans réappliquer — y compris après un plantage entre le traitement et la réponse. Un enregistrement ne peut structurellement jamais être créé deux fois.</div></details>
+    <details class="spec"><summary>S5 · Moteur de synchronisation</summary><div class="contenu">Déclencheurs : retour du réseau (événement <code>online</code>), ouverture de l'application, minuteur de 5 minutes, bouton manuel. Envoi FIFO par séquence locale ; reprise automatique des opérations au résultat inconnu (même op_id) ; tirage des nouveautés du périmètre après l'envoi ; alignement du cache sur la vérité serveur à chaque contact.</div></details>
+    <details class="spec"><summary>S6 · Conflits (R4, R5)</summary><div class="contenu">Verrou optimiste : chaque entité serveur porte un numéro de version ; l'opération de modification transporte la version de base. Écart détecté → état « conflit », signalé dans le centre de conflits, proposition conservée intacte, aucune écriture. L'opération en conflit n'est jamais renvoyée automatiquement. Arbitrage réservé à l'administrateur ; la fusion est appliquée sur la version serveur et les deux contributions sont conservées.</div></details>
+    <details class="spec"><summary>S7 · Contrôles financiers renforcés (R6)</summary><div class="contenu">Double étage : validation locale légère à la saisie (montant entier positif sous plafond, membre actif connu, période au format AAAA-MM) ; revalidation serveur intégrale à la synchro, autorité absolue (un client défectueux ne peut rien comptabiliser). Clé métier anti-doublon (membre, motif, période) — deux saisies du même paiement depuis deux appareils hors ligne donnent un seul enregistrement et un rejet explicite. Reçus numérotés par le serveur uniquement. La pénalité de 500 FCFA reste un calcul serveur sur données confirmées.</div></details>
+    <details class="spec"><summary>S8 · Gestion des erreurs</summary><div class="contenu">Codes de raison explicites renvoyés avec chaque verdict : DOUBLON_METIER, MONTANT_INVALIDE, MEMBRE_INACTIF_OU_INCONNU, PERMISSION_REVOQUEE, VERSION_OBSOLETE, STATUT_INVALIDE, DOUBLON_PARTICIPATION, CIBLE_INTROUVABLE, INTEGRITE_CACHE. Chaque rejet est affiché en langage clair avec le geste suivant (corriger, renoncer, saisir une contre-passation en ligne).</div></details>
+    <details class="spec"><summary>S9 · Sécurité des données locales (R7)</summary><div class="contenu">Empreinte HMAC-SHA256 sur chaque enregistrement du cache : toute falsification est détectée à la lecture, l'enregistrement falsifié est exclu de l'affichage et des totaux, puis réparé par resynchronisation — et rien ne remonte jamais vers le serveur. En production : chiffrement AES-256-GCM des champs sensibles avec clé dérivée du code PIN (PBKDF2), verrouillage après 5 minutes d'inactivité, effacement local à la déconnexion, aucune sauvegarde cloud du cache brut.</div></details>
+    <details class="spec"><summary>S10 · Permissions hors ligne (R8)</summary><div class="contenu">Snapshot des permissions du rôle stocké à chaque contact serveur et contrôlé à la saisie. Recontrôle serveur systématique à la synchro : une révocation survenue pendant la coupure rejette les opérations à la réception (PERMISSION_REVOQUEE) sans aucune écriture. Le snapshot est rafraîchi après chaque synchro — le formulaire retiré dès que le rôle change.</div></details>
+    <details class="spec"><summary>S11 · Disponibilité honnête</summary><div class="contenu">La matrice ci-dessous liste ce qui est réellement disponible hors ligne, en dégradé, ou indisponible. Rien n'est promis au-delà ; les écrans concernés affichent leur état au lieu de simuler une fonctionnalité.</div></details>
+    <details class="spec"><summary>S12 · Protocole de test</summary><div class="contenu">Banc Python archivé de référence (<code>simulation_hors_ligne.py</code>, 60 vérifications) + jumeau JavaScript intégré à ce prototype — mêmes verdicts (9/9 scénarios, 60/60, mêmes invariants). Les 9 scénarios couvrent les 8 règles absolues : coupure pendant la saisie, coupure pendant la synchronisation, reconnexion, double synchronisation, conflit entre deux appareils, doublon financier, révocation de permission, réponse perdue (sort ambigu), falsification locale.</div></details>
+  </section>
+
+  <div class="col2">
+    <section class="card">
+      <h2>12 · Matrice de disponibilité hors ligne</h2>
+      <div class="scroll-x"><table>
+        <tr><th>Fonctionnalité</th><th>Hors ligne</th></tr>
+        <tr><td>Consultation des données déjà synchronisées et autorisées (membres, cotisations, présences)</td><td><span class="badge b-valide">Disponible</span></td></tr>
+        <tr><td>Saisie d'un paiement, présence du 15, participation (mode attente)</td><td><span class="badge b-valide">Disponible</span></td></tr>
+        <tr><td>Correction d'une fiche membre (mode attente, risque de conflit)</td><td><span class="badge b-valide">Disponible</span></td></tr>
+        <tr><td>Annulation d'une opération encore en attente</td><td><span class="badge b-valide">Disponible</span></td></tr>
+        <tr><td>Totaux financiers (confirmé / attente / provisoire séparés)</td><td><span class="badge b-valide">Disponible</span></td></tr>
+        <tr><td>Statistiques de participation et classement d'engagement</td><td><span class="badge b-attente">Dégradé — cache local, provisoire</span></td></tr>
+        <tr><td>Calcul de la pénalité de 500 FCFA</td><td><span class="badge b-rejete">Indisponible — serveur seul</span></td></tr>
+        <tr><td>Première connexion d'un appareil, mot de passe oublié</td><td><span class="badge b-rejete">Indisponible — serveur requis</span></td></tr>
+        <tr><td>Arbitrage des conflits</td><td><span class="badge b-rejete">Indisponible — administrateur connecté</span></td></tr>
+        <tr><td>Notifications, e-mails, SMS</td><td><span class="badge b-rejete">Indisponible</span></td></tr>
+        <tr><td>Données jamais synchronisées sur l'appareil</td><td><span class="badge b-rejete">Indisponible</span></td></tr>
+      </table></div>
+    </section>
+
+    <section class="card">
+      <h2>13 · Limites honnêtes et risques résiduels</h2>
+      <ul style="font-size:.85rem;color:var(--ink-2);padding-left:18px;margin:8px 0 12px">
+        <li>IndexedDB est un stockage navigateur : une purge efface le cache et la file — la resynchronisation reconstitue tout depuis le serveur, aucune perte définitive.</li>
+        <li>Le chiffrement local protège contre la lecture passive, pas contre un attaquant ayant le téléphone déverrouillé, le PIN et du temps : le verrouillage de l'appareil lui-même reste nécessaire.</li>
+        <li>L'horloge locale n'est jamais utilisée pour la comptabilité : l'ordre des opérations et les dates font foi côté serveur uniquement.</li>
+        <li>Un navigateur ancien sans IndexedDB ne peut pas installer la PWA : navigateurs modernes requis (Chrome, Edge, Firefox, Safari récents).</li>
+        <li>Les opérations en attente d'un appareil sont invisibles des autres appareils jusqu'à la synchronisation — c'est voulu (S1) et démontré dans la feuille de présence.</li>
+        <li>La protection contre les doublons porte sur l'identifiant (R2) ET sur la clé métier financière (S7) : seule la première est techniquement absolue, la seconde relève de la règle comptable validée.</li>
+      </ul>
+      <h2 style="font-size:1.05rem">Choix ouverts soumis au bureau</h2>
+      <ul style="font-size:.85rem;color:var(--ink-2);padding-left:18px">
+        <li><b>E1 — Durée du snapshot de permissions</b> : proposition 72 h ; au-delà, les saisies sont bloquées jusqu'à reconnexion.</li>
+        <li><b>E2 — Conservation des rejets</b> : proposition 30 jours visibles dans la file puis purge manuelle ; un paiement rejeté DOUBLON_METIER reste consultable pour prudence.</li>
+        <li><b>E3 — Plafond du cache local</b> : proposition ≈ 50 Mo par appareil, priorité au périmètre du rôle.</li>
+      </ul>
+    </section>
+  </div>
+
+</main>
+
+<footer><div class="wrap">
+  <p><b>ADL-CI GESTION — pièce 6k</b> · Prototype autonome (aucune dépendance réseau), moteur identique au banc Python archivé <code>simulation_hors_ligne.py</code> (9/9 scénarios, 60/60 vérifications). Rapport de recette : document PDF joint.</p>
+  <p>Dépend des pièces validées : 6e (authentification et permissions), 6h (module financier — tranches, pénalité, reçus), 6i (réunions et activités — réunion du 15, quatre statuts, unicité). Alimente l'indicateur de synchronisation permanent RG-H4 de la pièce 6d.</p>
+</div></footer>
+
+<script>
+/* ======================================================================
+   ADL-CI GESTION — Moteur du fonctionnement hors ligne (pièce 6k)
+   Jumeau JavaScript du banc Python archivé (simulation_hors_ligne.py).
+   Mêmes classes, mêmes 9 scénarios, mêmes 60 vérifications : les deux
+   moteurs doivent rendre les mêmes verdicts (principe du test jumelé).
+   Compatible navigateur (window.ADLCI) et Node.js (module.exports).
+   ====================================================================== */
+"use strict";
+
+/* ---------------- Utilitaires ---------------- */
+function uuid4() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+    var r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+function utf8Bytes(s) { return Array.from(new TextEncoder().encode(s)); }
+function toHex(b) { return b.map(function (x) { return ("0" + x.toString(16)).slice(-2); }).join(""); }
+function rotr(x, n) { return ((x >>> n) | (x << (32 - n))) >>> 0; }
+
+var K256 = [
+  0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+  0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+  0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+  0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+  0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+  0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+  0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+  0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+
+function sha256Bytes(bytes) {
+  var H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  var l = bytes.length;
+  var data = bytes.concat([0x80]);
+  var k = (56 - (data.length % 64) + 64) % 64;
+  data = data.concat(new Array(k).fill(0));
+  var bits = l * 8;
+  data = data.concat([0,0,0,0,(bits>>>24)&255,(bits>>>16)&255,(bits>>>8)&255,bits&255]);
+  var w = new Array(64);
+  for (var i = 0; i < data.length; i += 64) {
+    for (var t = 0; t < 16; t++) {
+      w[t] = ((data[i+t*4] << 24) | (data[i+t*4+1] << 16) | (data[i+t*4+2] << 8) | data[i+t*4+3]) >>> 0;
+    }
+    for (t = 16; t < 64; t++) {
+      var s0 = (rotr(w[t-15],7) ^ rotr(w[t-15],18) ^ (w[t-15] >>> 3)) >>> 0;
+      var s1 = (rotr(w[t-2],17) ^ rotr(w[t-2],19) ^ (w[t-2] >>> 10)) >>> 0;
+      w[t] = (w[t-16] + s0 + w[t-7] + s1) >>> 0;
+    }
+    var a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
+    for (t = 0; t < 64; t++) {
+      var S1 = (rotr(e,6) ^ rotr(e,11) ^ rotr(e,25)) >>> 0;
+      var ch = ((e & f) ^ (~e & g)) >>> 0;
+      var t1 = (h + S1 + ch + K256[t] + w[t]) >>> 0;
+      var S0 = (rotr(a,2) ^ rotr(a,13) ^ rotr(a,22)) >>> 0;
+      var maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
+      var t2 = (S0 + maj) >>> 0;
+      h=g; g=f; f=e; e=(d+t1)>>>0; d=c; c=b; b=a; a=(t1+t2)>>>0;
+    }
+    H[0]=(H[0]+a)>>>0; H[1]=(H[1]+b)>>>0; H[2]=(H[2]+c)>>>0; H[3]=(H[3]+d)>>>0;
+    H[4]=(H[4]+e)>>>0; H[5]=(H[5]+f)>>>0; H[6]=(H[6]+g)>>>0; H[7]=(H[7]+h)>>>0;
+  }
+  var out = [];
+  H.forEach(function (x) { out.push((x>>>24)&255,(x>>>16)&255,(x>>>8)&255,x&255); });
+  return out;
+}
+function sha256Hex(str) { return toHex(sha256Bytes(utf8Bytes(str))); }
+function hmacSha256Hex(keyStr, msgStr) {
+  var key = utf8Bytes(keyStr);
+  if (key.length > 64) key = sha256Bytes(key);
+  var k = new Array(64).fill(0);
+  for (var i = 0; i < key.length; i++) k[i] = key[i];
+  var o = k.map(function (b) { return b ^ 0x5c; });
+  var p = k.map(function (b) { return b ^ 0x36; });
+  return toHex(sha256Bytes(o.concat(sha256Bytes(p.concat(utf8Bytes(msgStr))))));
+}
+
+/* ---------------- Paramètres (module financier validé V) ---------------- */
+var MOTIFS_AUTORISES = ["tranche", "solde"];
+var PLAFOND_MONTANT = 500000;
+var STATUTS_PRESENCE = ["present", "absent", "excuse", "non_concerne"];
+
+/* ---------------- Permissions (règle R8) ---------------- */
+var ROLE_PERMS = {
+  admin:       { ecrire: ["paiement","presence","participation","membre"], resoudreConflit: true },
+  tresorier:   { ecrire: ["paiement","presence","participation"],          resoudreConflit: false },
+  secretaire:  { ecrire: ["presence","participation","membre"],            resoudreConflit: false },
+  membre:      { ecrire: [],                                               resoudreConflit: false }
+};
+function permOk(role, action, entite) {
+  if (!role) return false;
+  var p = ROLE_PERMS[role];
+  if (!p) return false;
+  if (action === "resoudre_conflit") return p.resoudreConflit === true;
+  return p.ecrire.indexOf(entite) >= 0;
+}
+
+/* ---------------- Serveur central ---------------- */
+function LienCoupe() { this.message = "lien coupé"; }
+LienCoupe.prototype = Object.create(Error.prototype);
+
+var _SERVEURS = [];   // registre pour les invariants globaux du banc
+
+function Serveur() {
+  this.entites = {};          // clé "type:id" -> {champs, version, majPar, majOp}
+  this.journal = {};          // opId -> verdict d'origine — CLÉ UNIQUE (R1, R2)
+  this.paiementsParCle = {};  // clé métier -> entité (anti-doublon financier, R6)
+  this.participationsCle = {}; // unicité participation par membre et par événement (A)
+  this.users = {};
+  this.seqSrv = 0;
+  this.stats = { applied: 0, replayed: 0, rejected: 0, conflict: 0 };
+  _SERVEURS.push(this);
+}
+Serveur.prototype._validerPaiement = function (op) {
+  var pl = op.payload, montant = pl.montant;
+  if (typeof montant !== "number" || isNaN(montant) || montant <= 0 || montant > PLAFOND_MONTANT) return "MONTANT_INVALIDE";
+  if (MOTIFS_AUTORISES.indexOf(pl.motif) < 0) return "MOTIF_INVALIDE";
+  var m = this.entites["membre:" + pl.membre];
+  if (!m || m.champs.statut !== "actif") return "MEMBRE_INACTIF_OU_INCONNU";
+  if (!pl.periode) return "PERIODE_MANQUANTE";
+  if (pl.motif === "tranche" || pl.motif === "solde") {
+    var cle = "paiement|" + pl.membre + "|" + pl.motif + "|" + pl.periode;
+    if (this.paiementsParCle[cle]) return "DOUBLON_METIER";
+  }
+  return null;
+};
+Serveur.prototype.apply = function (op) {
+  // (1) Idempotence stricte : un op_id n'est JAMAIS traité deux fois (R1, R2).
+  if (this.journal[op.opId]) {
+    var j = this.journal[op.opId];
+    this.stats.replayed++;
+    return { outcome: j.outcome, replay: true, result: j.result, reason: j.reason };
+  }
+  // (2) Recontrôle des permissions AU MOMENT de la synchro (R8).
+  var user = this.users[op.userId];
+  var role = user ? user.role : null;
+  if (!user || user.actif !== true || !permOk(role, "ecrire", op.entityType)) {
+    return this._record(op, "rejected", null, "PERMISSION_REVOQUEE");
+  }
+  // (3) Contrôles renforcés pour les opérations financières (R6).
+  if (op.entityType === "paiement") {
+    var err = this._validerPaiement(op);
+    if (err) return this._record(op, "rejected", null, err);
+  }
+  // (4) Validation commune présence / participation (module A1–A6).
+  if (op.entityType === "presence" || op.entityType === "participation") {
+    if (!this.entites["membre:" + op.payload.membre]) return this._record(op, "rejected", null, "MEMBRE_INCONNU");
+    if (STATUTS_PRESENCE.indexOf(op.payload.statut) < 0) return this._record(op, "rejected", null, "STATUT_INVALIDE");
+    var evenement = op.payload.reunion || op.payload.activite;
+    var cleP = op.entityType + "|" + evenement + "|" + op.payload.membre;
+    if (this.participationsCle[cleP]) return this._record(op, "rejected", null, "DOUBLON_PARTICIPATION");
+  }
+  // (5) Détection de conflit par verrou optimiste (R4, R5).
+  if (op.entityId !== null && op.entityId !== undefined) {
+    var ent = this.entites[op.entityType + ":" + op.entityId];
+    if (!ent) return this._record(op, "rejected", null, "CIBLE_INTROUVABLE");
+    if (ent.version !== op.baseVersion) {
+      this.seqSrv++;
+      return this._record(op, "conflict", { version_serveur: ent.version, base_version: op.baseVersion, server_seq: this.seqSrv }, "VERSION_OBSOLETE");
+    }
+  }
+  // (6) Application.
+  this.seqSrv++;
+  if (op.entityId === null || op.entityId === undefined) {
+    var prefixe = { paiement: "PAI", presence: "PRE", participation: "ACT" }[op.entityType];
+    var eid = prefixe + "-" + String(this.seqSrv).padStart(4, "0");
+    var entKey = op.entityType + ":" + eid;
+    var recu = op.entityType === "paiement" ? "REC-" + String(this.seqSrv).padStart(6, "0") : null;
+    if (op.entityType === "paiement") {
+      this.paiementsParCle["paiement|" + op.payload.membre + "|" + op.payload.motif + "|" + op.payload.periode] = entKey;
+    }
+    if (op.entityType === "presence" || op.entityType === "participation") {
+      this.participationsCle[op.entityType + "|" + (op.payload.reunion || op.payload.activite) + "|" + op.payload.membre] = entKey;
+    }
+    this.entites[entKey] = { champs: Object.assign({}, op.payload), version: 1, majPar: op.userId, majOp: op.opId };
+    return this._record(op, "applied", { entite: entKey, version: 1, numero_recu: recu, server_seq: this.seqSrv }, null);
+  }
+  var e2 = this.entites[op.entityType + ":" + op.entityId];
+  e2.version++;
+  Object.assign(e2.champs, op.payload);
+  e2.majPar = op.userId; e2.majOp = op.opId;
+  return this._record(op, "applied", { entite: op.entityType + ":" + op.entityId, version: e2.version, server_seq: this.seqSrv }, null);
+};
+Serveur.prototype._record = function (op, outcome, result, reason) {
+  if (this.journal[op.opId]) throw new Error("VIOLATION R2 : verdict déjà existant pour " + op.opId);
+  this.journal[op.opId] = { outcome: outcome, result: result, reason: reason,
+    op: { type: op.entityType, id: op.entityId, payload: Object.assign({}, op.payload) } };
+  this.stats[outcome]++;
+  return { outcome: outcome, replay: false, result: result, reason: reason };
+};
+Serveur.prototype.nbPaiements = function (membre, motif, periode) {
+  var n = 0;
+  Object.keys(this.entites).forEach(function (k) {
+    var e = this.entites[k];
+    if (k.indexOf("paiement:") === 0 && e.champs.membre === membre && e.champs.motif === motif && e.champs.periode === periode) n++;
+  }, this);
+  return n;
+};
+
+/* ---------------- Appareil PWA ---------------- */
+var STATUTS_LIBELLES = {
+  pending:   "[ATTENTE] En attente de synchronisation — NON validé",
+  in_flight: "[INCONNU] Envoyé, confirmation non reçue — NON validé",
+  confirmed: "[VALIDE]  Confirmé par le serveur",
+  rejected:  "[REJETE]  Rejeté par le serveur — {raison}",
+  conflict:  "[CONFLIT] Conflit détecté — décision requise",
+  annule:    "[ANNULE]  Annulé localement"
+};
+function libelle(op) { return STATUTS_LIBELLES[op.status].replace("{raison}", op.reason || "-"); }
+
+function Operation(entityType, payload, entityId, baseVersion, userId, roleSaisie, seq) {
+  this.entityType = entityType;
+  this.payload = payload;
+  this.entityId = entityId;
+  this.baseVersion = baseVersion;
+  this.opId = uuid4();
+  this.userId = userId;
+  this.roleSaisie = roleSaisie;
+  this.seq = seq;
+  this.status = "pending";
+  this.result = null;
+  this.reason = null;
+  this.replay = false;
+  this.tentatives = 0;
+  this.historique = [];
+}
+
+function Appareil(nom, userId, serveur, reseau) {
+  this.nom = nom; this.userId = userId; this.serveur = serveur; this.reseau = reseau;
+  this.cache = {};
+  this.outbox = [];
+  this.conflits = [];
+  this.seq = 0;
+  this.snapshotPerms = null;
+  this.cleIntegrite = sha256Hex("cle-integrite-" + nom);
+}
+Appareil.prototype._hmacRec = function (cleEntite, champs, version) {
+  var ks = Object.keys(champs).sort();
+  var canon = "{" + ks.map(function (k) { return JSON.stringify(k) + ":" + JSON.stringify(champs[k]); }).join(",") + "}|v" + version;
+  return hmacSha256Hex(this.cleIntegrite, canon);
+};
+Appareil.prototype._mettreEnCache = function (cle, champs, version) {
+  this.cache[cle] = { champs: Object.assign({}, champs), version: version, hmac: this._hmacRec(cle, champs, version) };
+};
+Appareil.prototype.integriteOk = function (cle) {
+  var rec = this.cache[cle];
+  if (!rec) return false;
+  return this._hmacRec(cle, rec.champs, rec.version) === rec.hmac;
+};
+Appareil.prototype.lire = function (cle) {
+  var rec = this.cache[cle];
+  if (!rec) return null;
+  if (!this.integriteOk(cle)) return { __corrompu__: true, raison: "INTEGRITE_CACHE" };
+  return rec;
+};
+Appareil.prototype.chargerCacheDepuis = function (serveur, cles) {
+  var self = this;
+  cles.forEach(function (cle) {
+    var e = serveur.entites[cle];
+    self._mettreEnCache(cle, e.champs, e.version);
+  });
+};
+Appareil.prototype.snapshotPermissions = function (serveur) {
+  var role = serveur.users[this.userId].role;
+  this.snapshotPerms = { role: role, ecrire: ROLE_PERMS[role].ecrire.slice(), resoudreConflit: ROLE_PERMS[role].resoudreConflit };
+};
+Appareil.prototype.peutEcrire = function (entite) {
+  return this.snapshotPerms ? this.snapshotPerms.ecrire.indexOf(entite) >= 0 : false;
+};
+Appareil.prototype.saisir = function (entityType, payload, entityId, baseVersion, forcer) {
+  if (!forcer && !this.peutEcrire(entityType)) return [null, "PERMISSION_LOCALE_REFUSEE"];
+  var op = new Operation(entityType, Object.assign({}, payload), entityId || null, baseVersion || 0, this.userId, this.snapshotPerms ? this.snapshotPerms.role : "?", this.seq + 1);
+  this.seq++;
+  this.outbox.push(op);
+  return [op, null];
+};
+Appareil.prototype.opsEnAttenteSur = function (entityType, idEntite) {
+  return this.outbox.filter(function (o) {
+    return o.entityType === entityType && o.entityId === idEntite && (o.status === "pending" || o.status === "in_flight" || o.status === "conflict");
+  });
+};
+Appareil.prototype.totauxPaiements = function () {
+  var confirmes = 0;
+  var self = this;
+  Object.keys(this.cache).forEach(function (cle) {
+    if (cle.indexOf("paiement:") === 0 && self.integriteOk(cle)) confirmes += self.cache[cle].champs.montant;
+  });
+  var attente = this.outbox.reduce(function (acc, op) {
+    return acc + (op.entityType === "paiement" && (op.status === "pending" || op.status === "in_flight") ? op.payload.montant : 0);
+  }, 0);
+  return { total_confirme: confirmes, total_en_attente: attente, total_provisoire: confirmes + attente };
+};
+Appareil.prototype.synchroniser = function () {
+  var reseau = this.reseau;
+  if (!reseau.disponible) return { envoyes: 0, note: "réseau indisponible" };
+  var self = this;
+  this.outbox.forEach(function (op) {
+    if (op.status === "in_flight") { op.status = "pending"; op.historique.push("REPRISE_APRES_RESULTAT_AMBIGU"); }
+  });
+  var envoyes = 0;
+  var pending = this.outbox.filter(function (o) { return o.status === "pending"; }).sort(function (a, b) { return a.seq - b.seq; });
+  for (var i = 0; i < pending.length; i++) {
+    var op = pending[i];
+    op.status = "in_flight"; op.tentatives++;
+    var reponse;
+    try { reponse = reseau.transmettre(function () { return self.serveur.apply(op); }); }
+    catch (e) {
+      if (e instanceof LienCoupe) { op.status = "pending"; op.historique.push("RESEAU_COUPE_AVANT_REPONSE"); break; }
+      throw e;
+    }
+    envoyes++;
+    if (reponse === null) { op.status = "in_flight"; op.historique.push("REPONSE_PERDUE_ATTENTE_REPRISE"); continue; }
+    this._traiterReponse(op, reponse);
+  }
+  if (reseau.disponible) {
+    Object.keys(this.cache).forEach(function (cle) {
+      var e = self.serveur.entites[cle];
+      if (e) self._mettreEnCache(cle, e.champs, e.version);
+    });
+  }
+  return { envoyes: envoyes };
+};
+Appareil.prototype._traiterReponse = function (op, reponse) {
+  op.replay = reponse.replay === true;
+  var outcome = reponse.outcome;
+  if (outcome === "applied") {
+    op.status = "confirmed"; op.result = reponse.result; op.reason = null;
+    var entite = op.result ? op.result.entite : null;
+    var e = entite ? this.serveur.entites[entite] : null;
+    if (e) this._mettreEnCache(entite, e.champs, e.version);
+  } else if (outcome === "rejected") {
+    op.status = "rejected"; op.reason = reponse.reason;
+  } else if (outcome === "conflict") {
+    op.status = "conflict"; op.reason = reponse.reason; op.result = reponse.result || {};
+    this.conflits.push({
+      opId: op.opId,
+      entite: op.entityType + ":" + op.entityId,
+      raison: op.reason,
+      versionServeur: op.result.version_serveur,
+      payload: Object.assign({}, op.payload)
+    });
+  }
+};
+
+/* ---------------- Réseau défaillant scriptable ---------------- */
+function Reseau() {
+  this.disponible = true;
+  this.compteur = 0;
+  this.couperApresRequete = null;
+  this.reponsesPerdues = {};
+}
+Reseau.prototype.transmettre = function (fn) {
+  if (!this.disponible) throw new LienCoupe();
+  this.compteur++;
+  var n = this.compteur;
+  var resultat = fn();
+  if (this.couperApresRequete !== null && n >= this.couperApresRequete) { this.disponible = false; return null; }
+  if (this.reponsesPerdues[n]) return null;
+  return resultat;
+};
+Reseau.prototype.restaurer = function () {
+  this.disponible = true; this.couperApresRequete = null; this.reponsesPerdues = {};
+};
+
+/* ---------------- Monde de test ---------------- */
+function nouveauMonde() {
+  var srv = new Serveur();
+  var membres = [
+    ["M001", "ADLCI-2026-0001", "Kouassi Jean", "Douayêro", "07 01 11 22 33"],
+    ["M002", "ADLCI-2026-0002", "Aya Fatou", "Mariabêh", "05 04 55 66 77"],
+    ["M003", "ADLCI-2026-0003", "Bamba Salif", "Djigayabêh", "01 02 33 44 55"],
+    ["M004", "ADLCI-2026-0004", "N'Guessan Paul", "Aliyabêh", "07 08 99 00 11"]
+  ];
+  membres.forEach(function (m) {
+    srv.entites["membre:" + m[0]] = {
+      champs: { matricule: m[1], nom: m[2], tribu: m[3], telephone: m[4], quartier: "Adjamé", statut: "actif" },
+      version: 1, majPar: "seed", majOp: "-"
+    };
+  });
+  srv.users = { u_tresorier: { role: "tresorier", actif: true }, u_secretaire: { role: "secretaire", actif: true }, u_admin: { role: "admin", actif: true } };
+  srv.entites["paiement:PAI-0001"] = {
+    champs: { membre: "M001", motif: "tranche", periode: "2026-10", montant: 4500 },
+    version: 1, majPar: "u_tresorier", majOp: "-"
+  };
+  srv.paiementsParCle["paiement|M001|tranche|2026-10"] = "paiement:PAI-0001";
+  srv.seqSrv = 1;
+  var reseau = new Reseau();
+  var A = new Appareil("Telephone-Tresorier", "u_tresorier", srv, reseau);
+  var B = new Appareil("Telephone-Secretaire", "u_secretaire", srv, reseau);
+  var C = new Appareil("Tablette-Admin", "u_admin", srv, reseau);
+  [A, B, C].forEach(function (app) {
+    app.snapshotPermissions(srv);
+    app.chargerCacheDepuis(srv, Object.keys(srv.entites));
+  });
+  return { srv: srv, reseau: reseau, A: A, B: B, C: C };
+}
+
+/* ---------------- Banc de tests : 9 scénarios, 60 vérifications ---------------- */
+var BILAN = [];
+
+function Verifs(nom, regles) {
+  this.nom = nom; this.regles = regles; this.resultats = [];
+}
+Verifs.prototype.verifier = function (cond, msg) {
+  this.resultats.push([!!cond, msg]);
+  return !!cond;
+};
+Verifs.prototype.cloturer = function () {
+  BILAN.push({ nom: this.nom, regles: this.regles, ok: this.resultats.every(function (r) { return r[0]; }),
+    nb: this.resultats.length, okCount: this.resultats.filter(function (r) { return r[0]; }).length,
+    resultats: this.resultats });
+};
+
+function t1() {
+  var v = new Verifs("T1 — Coupure pendant la saisie", "R1, R3");
+  var m = nouveauMonde(), srv = m.srv, reseau = m.reseau, A = m.A;
+  reseau.disponible = false;
+  var r1 = A.saisir("paiement", { membre: "M001", motif: "tranche", periode: "2026-11", montant: 4500 });
+  var op = r1[0];
+  v.verifier(r1[1] === null, "La saisie hors ligne est acceptée (fonctionnalité compatible)");
+  v.verifier(op !== null && op.opId.length === 36, "R1 — l'opération porte un identifiant unique UUIDv4 : " + op.opId.slice(0, 13) + "…");
+  var tous = [].concat(A.outbox, m.B.outbox, m.C.outbox).map(function (o) { return o.opId; });
+  v.verifier(new Set(tous).size === tous.length, "R1 — aucun doublon d'op_id entre les 3 appareils");
+  v.verifier(op.status === "pending", "R3 — statut affiché : " + libelle(op));
+  var tot = A.totauxPaiements();
+  v.verifier(tot.total_confirme === 4500 && tot.total_en_attente === 4500 && tot.total_provisoire === 9000,
+    "R3 — le paiement en attente est compté à part : il n'est PAS dans le total confirmé");
+  v.verifier(A.outbox.indexOf(op) >= 0, "R3 — l'opération attend dans la file locale (outbox), rien n'a été envoyé");
+  v.verifier(srv.nbPaiements("M001", "tranche", "2026-11") === 0, "Le serveur n'a rien reçu (coupure totale)");
+  v.cloturer();
+}
+
+function t2() {
+  var v = new Verifs("T2 — Coupure pendant la synchronisation", "R1, R2, R3, R5");
+  var m = nouveauMonde(), srv = m.srv, reseau = m.reseau, A = m.A;
+  var op1 = A.saisir("paiement", { membre: "M002", motif: "tranche", periode: "2026-11", montant: 4500 })[0];
+  var op2 = A.saisir("presence", { membre: "M001", reunion: "R-2026-11", statut: "present" })[0];
+  var op3 = A.saisir("participation", { membre: "M004", activite: "ACT-2026-11", statut: "excuse" })[0];
+  reseau.couperApresRequete = 1;
+  A.synchroniser();
+  v.verifier(op1.status === "in_flight", "R3 — op1 en état « résultat inconnu » : " + libelle(op1));
+  v.verifier(op1.status !== "confirmed", "R3 — op1 n'est JAMAIS présentée comme validée");
+  v.verifier(srv.nbPaiements("M002", "tranche", "2026-11") === 1, "Le serveur a appliqué op1 (l'appareil ne peut pas le savoir)");
+  v.verifier(op2.status === "pending" && op3.status === "pending", "op2 et op3 sont restées en attente (aucun état semi-appliqué)");
+  reseau.restaurer();
+  A.synchroniser();
+  v.verifier(op1.status === "confirmed" && op1.replay, "R2 — op1 renvoyée avec le MÊME op_id : le serveur répond « déjà appliquée » (replay)");
+  v.verifier(srv.nbPaiements("M002", "tranche", "2026-11") === 1, "R2 — exactement UN paiement (M002, tranche, 2026-11) malgré le double envoi");
+  v.verifier(Object.keys(srv.journal).length === 3, "R1 — le journal serveur ne contient qu'un verdict par op_id (3 opérations)");
+  v.verifier(op2.status === "confirmed" && op3.status === "confirmed", "op2 et op3 confirmées après la reprise");
+  v.verifier(A.lire(op1.result.entite).champs.montant === 4500 && A.lire(op1.result.entite).version === 1,
+    "R5 — le cache local est aligné sur la vérité serveur (paiement confirmé en cache)");
+  var nPre = 0, nAct = 0;
+  Object.keys(srv.entites).forEach(function (k) { if (k.indexOf("presence:") === 0) nPre++; if (k.indexOf("participation:") === 0) nAct++; });
+  v.verifier(nPre === 1 && nAct === 1, "R2 — une seule présence et une seule participation enregistrées");
+  v.verifier(op1.historique.indexOf("REPRISE_APRES_RESULTAT_AMBIGU") >= 0 && op1.tentatives === 2, "La reprise est tracée dans l'historique de l'opération");
+  v.cloturer();
+}
+
+function t3() {
+  var v = new Verifs("T3 — Reconnexion et vidage de la file", "R3");
+  var m = nouveauMonde(), srv = m.srv, reseau = m.reseau, A = m.A;
+  reseau.disponible = false;
+  var op1 = A.saisir("paiement", { membre: "M001", motif: "tranche", periode: "2026-11", montant: 4500 })[0];
+  var op2 = A.saisir("presence", { membre: "M002", reunion: "R-2026-11", statut: "absent" })[0];
+  var op3 = A.saisir("participation", { membre: "M004", activite: "ACT-2026-11", statut: "non_concerne" })[0];
+  reseau.restaurer();
+  var res = A.synchroniser();
+  v.verifier(op1.status === "confirmed" && op2.status === "confirmed" && op3.status === "confirmed",
+    "R3 — les 3 opérations passent de « en attente » à « validé »");
+  var tot = A.totauxPaiements();
+  v.verifier(tot.total_confirme === 9000 && tot.total_en_attente === 0,
+    "R3 — le total confirmé passe de 4 500 à 9 000 FCFA (attente=0) : " + JSON.stringify(tot));
+  v.verifier(op1.result.numero_recu === "REC-000002", "Le reçu officiel est émis par le serveur : " + op1.result.numero_recu);
+  var seqs = [op1.result.server_seq, op2.result.server_seq, op3.result.server_seq];
+  v.verifier(seqs[0] < seqs[1] && seqs[1] < seqs[2], "Ordre FIFO respecté (server_seq " + JSON.stringify(seqs) + ") : paiement → présence → participation");
+  var nPre = 0, nAct = 0;
+  Object.keys(srv.entites).forEach(function (k) { if (k.indexOf("presence:") === 0) nPre++; if (k.indexOf("participation:") === 0) nAct++; });
+  v.verifier(nPre === 1 && nAct === 1, "R2 — une seule présence et une seule participation (aucune double écriture)");
+  v.cloturer();
+}
+
+function t4() {
+  var v = new Verifs("T4 — Double synchronisation", "R1, R2");
+  var m = nouveauMonde(), srv = m.srv, reseau = m.reseau, A = m.A;
+  var op1 = A.saisir("paiement", { membre: "M002", motif: "solde", periode: "2026-11", montant: 13500 })[0];
+  A.synchroniser();
+  var nbAvant = Object.keys(srv.entites).length, journalAvant = Object.keys(srv.journal).length;
+  A.synchroniser(); A.synchroniser();
+  var rep = srv.apply(op1);
+  v.verifier(rep.replay === true && rep.outcome === "applied", "R2 — le 2e envoi du même op_id renvoie le verdict d'origine (replay), sans réappliquer");
+  v.verifier(Object.keys(srv.journal).length === journalAvant, "R1 — le journal n'acquérait AUCUN nouveau verdict pour ce op_id");
+  v.verifier(Object.keys(srv.entites).length === nbAvant, "R2 — aucun enregistrement supplémentaire créé par les synchros répétées");
+  v.verifier(srv.nbPaiements("M002", "solde", "2026-11") === 1, "R2 — exactement UN paiement (M002, solde, 2026-11) dans la comptabilité");
+  v.verifier(op1.result.numero_recu === "REC-000002", "Le numéro de reçu reste identique après les doubles envois");
+  v.cloturer();
+}
+
+function t5() {
+  var v = new Verifs("T5 — Conflit entre deux appareils", "R4, R5, R8");
+  var m = nouveauMonde(), srv = m.srv, reseau = m.reseau, A = m.A, B = m.B, C = m.C;
+  reseau.disponible = false;
+  var opC1 = C.saisir("membre", { telephone: "07 01 02 03 04" }, "M002", C.cache["membre:M002"].version)[0];
+  var opB = B.saisir("membre", { quartier: "Cocody" }, "M002", B.cache["membre:M002"].version)[0];
+  reseau.restaurer();
+  C.synchroniser();
+  v.verifier(opC1.status === "confirmed" && srv.entites["membre:M002"].version === 2, "L'opération de C est appliquée : M002 passe en version 2");
+  B.synchroniser();
+  v.verifier(opB.status === "conflict" && opB.reason === "VERSION_OBSOLETE", "R4 — le conflit est DÉTECTÉ : " + libelle(opB));
+  v.verifier(B.conflits.length === 1 && B.conflits[0].versionServeur === 2, "R4 — le conflit est SIGNALÉ dans le centre de conflits de B (version serveur = 2)");
+  v.verifier(srv.entites["membre:M002"].champs.quartier === "Adjamé", "R5 — la proposition de B n'a PAS écrasé l'état du serveur (quartier inchangé)");
+  v.verifier(opB.payload.quartier === "Cocody", "R5 — la proposition de B reste INTACTE dans le centre de conflits (rien n'est perdu)");
+  v.verifier(B.lire("membre:M002").version === 2, "Le cache de B affiche la version concurrente (v2) pour éclairer la décision");
+  var journalOpB = Object.keys(srv.journal).filter(function (k) { return k === opB.opId; }).length;
+  B.synchroniser();
+  var journalOpB2 = Object.keys(srv.journal).filter(function (k) { return k === opB.opId; }).length;
+  v.verifier(opB.status === "conflict" && journalOpB2 === journalOpB, "R5 — une opération en conflit n'est jamais renvoyée automatiquement (journal inchangé)");
+  v.verifier(!permOk("secretaire", "resoudre_conflit"), "R8 — un secrétaire NE PEUT PAS arbitrer un conflit");
+  v.verifier(permOk("admin", "resoudre_conflit"), "R8 — l'arbitrage est réservé au rôle admin");
+  var opC2 = C.saisir("membre", { quartier: "Cocody" }, "M002", C.cache["membre:M002"].version)[0];
+  C.synchroniser(); B.synchroniser(); A.synchroniser();
+  v.verifier(srv.entites["membre:M002"].version === 3, "La fusion validée par l'admin porte M002 en version 3");
+  var champs = B.lire("membre:M002").champs;
+  v.verifier(B.lire("membre:M002").version === 3 && C.lire("membre:M002").version === 3 && A.lire("membre:M002").version === 3
+    && champs.telephone === "07 01 02 03 04" && champs.quartier === "Cocody",
+    "R5 — convergence des 3 appareils : le téléphone de C ET le quartier de B sont conservés");
+  v.cloturer();
+}
+
+function t6() {
+  var v = new Verifs("T6 — Doublon financier sur deux appareils", "R2, R6");
+  var m = nouveauMonde(), srv = m.srv, reseau = m.reseau, A = m.A, C = m.C;
+  reseau.disponible = false;
+  var opA = A.saisir("paiement", { membre: "M003", motif: "tranche", periode: "2026-11", montant: 4500 })[0];
+  var opC = C.saisir("paiement", { membre: "M003", motif: "tranche", periode: "2026-11", montant: 4500 })[0];
+  v.verifier(opA.opId !== opC.opId, "R1 — deux saisies du même paiement = deux op_id DIFFÉRENTS (l'idempotence ne masque pas le doublon métier)");
+  reseau.restaurer();
+  A.synchroniser();
+  v.verifier(opA.status === "confirmed", "Le 1er paiement passe : " + opA.result.numero_recu);
+  C.synchroniser();
+  v.verifier(opC.status === "rejected" && opC.reason === "DOUBLON_METIER", "R6 — le 2e paiement est REJETÉ : " + libelle(opC));
+  v.verifier(srv.nbPaiements("M003", "tranche", "2026-11") === 1, "R6 — la comptabilité ne contient qu'UN paiement de 4 500 FCFA pour (M003, tranche, 2026-11)");
+  v.verifier(C.totauxPaiements().total_en_attente === 0, "R3 — chez C, le montant rejeté n'apparaît plus ni en attente ni en confirmé");
+  var opX = A.saisir("paiement", { membre: "M003", motif: "tranche", periode: "2026-12", montant: -500 }, null, 0, true)[0];
+  var opY = A.saisir("paiement", { membre: "M999", motif: "tranche", periode: "2026-12", montant: 4500 }, null, 0, true)[0];
+  A.synchroniser();
+  v.verifier(opX.status === "rejected" && (opX.reason === "MONTANT_INVALIDE" || opY.reason === "MONTANT_INVALIDE")
+    && (opX.reason === "MEMBRE_INACTIF_OU_INCONNU" || opY.reason === "MEMBRE_INACTIF_OU_INCONNU"),
+    "R6 — revalidation serveur intégrale : montant négatif et membre inconnu rejetés");
+  v.cloturer();
+}
+
+function t7() {
+  var v = new Verifs("T7 — Permission révoquée hors ligne", "R3, R6, R8");
+  var m = nouveauMonde(), srv = m.srv, reseau = m.reseau, A = m.A;
+  reseau.disponible = false;
+  var op1 = A.saisir("paiement", { membre: "M001", motif: "tranche", periode: "2026-11", montant: 4500 })[0];
+  var op2 = A.saisir("paiement", { membre: "M002", motif: "tranche", periode: "2026-11", montant: 4500 })[0];
+  v.verifier(op1.status === "pending", "R3 — saisie acceptée hors ligne : " + libelle(op1));
+  srv.users.u_tresorier = { role: "membre", actif: true };
+  reseau.restaurer();
+  A.synchroniser();
+  v.verifier(op1.status === "rejected" && op1.reason === "PERMISSION_REVOQUEE" && op2.status === "rejected" && op2.reason === "PERMISSION_REVOQUEE",
+    "R8 — les 2 opérations sont REJETÉES à la synchro : " + libelle(op1));
+  v.verifier(srv.nbPaiements("M001", "tranche", "2026-11") === 0 && srv.nbPaiements("M002", "tranche", "2026-11") === 0,
+    "R6 — AUCUNE écriture financière n'a été comptabilisée");
+  v.verifier(A.totauxPaiements().total_en_attente === 0, "R3 — les montants rejetés ne sont comptés ni en attente ni en confirmé");
+  A.snapshotPermissions(srv);
+  v.verifier(A.snapshotPerms.role === "membre" && !A.peutEcrire("paiement"),
+    "R8 — après synchro, le snapshot de permissions est rafraîchi : le formulaire de paiement est retiré");
+  var r3 = A.saisir("paiement", { membre: "M001", motif: "tranche", periode: "2026-12", montant: 4500 });
+  v.verifier(r3[0] === null && r3[1] === "PERMISSION_LOCALE_REFUSEE", "R8 — une nouvelle saisie de paiement est bloquée dès la saisie");
+  v.cloturer();
+}
+
+function t8() {
+  var v = new Verifs("T8 — Réponse perdue (sort ambigu)", "R2, R3");
+  var m = nouveauMonde(), srv = m.srv, reseau = m.reseau, A = m.A;
+  var op1 = A.saisir("paiement", { membre: "M004", motif: "tranche", periode: "2026-11", montant: 4500 })[0];
+  reseau.reponsesPerdues[1] = true;
+  A.synchroniser();
+  v.verifier(op1.status === "in_flight", "R3 — statut affiché : " + libelle(op1) + " (jamais « validé »)");
+  v.verifier(srv.nbPaiements("M004", "tranche", "2026-11") === 1, "Le serveur a en réalité APPLIQUÉ le paiement (l'appareil l'ignore)");
+  A.synchroniser();
+  v.verifier(op1.status === "confirmed" && op1.replay, "R2 — la reprise obtient le verdict d'origine (replay) : paiement validé UNE fois");
+  v.verifier(srv.nbPaiements("M004", "tranche", "2026-11") === 1 && Object.keys(srv.journal).length === 1,
+    "R2 — un seul enregistrement, un seul verdict dans le journal");
+  v.cloturer();
+}
+
+function t9() {
+  var v = new Verifs("T9 — Protection des données locales", "R7");
+  var m = nouveauMonde(), srv = m.srv, A = m.A;
+  A.cache["paiement:PAI-0001"].champs.montant = 999999;
+  var lecture = A.lire("paiement:PAI-0001");
+  v.verifier(lecture.__corrompu__ === true && lecture.raison === "INTEGRITE_CACHE", "R7 — la falsification est DÉTECTÉE à la lecture (empreinte HMAC invalide)");
+  v.verifier(A.totauxPaiements().total_confirme === 0, "R7 — l'enregistrement falsifié est EXCLU des totaux (affichage protégé)");
+  v.verifier(srv.entites["paiement:PAI-0001"].champs.montant === 4500, "R7 — la falsification locale ne remonte JAMAIS vers le serveur (4 500 FCFA intacts)");
+  A.synchroniser();
+  var lecture2 = A.lire("paiement:PAI-0001");
+  v.verifier(!lecture2.__corrompu__ && lecture2.champs.montant === 4500, "R7 — après resynchronisation, le cache est réparé depuis le serveur (4 500 FCFA)");
+  v.verifier(A.totauxPaiements().total_confirme === 4500, "Les totaux redeviennent exacts");
+  v.cloturer();
+}
+
+function runBanc() {
+  return runBancComplet();
+}
+
+/* Banc complet avec statistiques serveur (équivalent main() du banc Python) */
+function runBancComplet() {
+  BILAN.length = 0;
+  _SERVEURS.length = 0;
+  [t1, t2, t3, t4, t5, t6, t7, t8, t9].forEach(function (t) { t(); });
+  var verdicts = { applied: 0, rejected: 0, conflict: 0 }, replays = 0, totalJournal = 0;
+  _SERVEURS.forEach(function (s) {
+    verdicts.applied += s.stats.applied;
+    verdicts.rejected += s.stats.rejected;
+    verdicts.conflict += s.stats.conflict;
+    replays += s.stats.replayed;
+    totalJournal += Object.keys(s.journal).length;
+  });
+  return { bilan: BILAN.slice(), verdicts: verdicts, replays: replays, totalJournal: totalJournal };
+}
+
+var ADLCI = {
+  Serveur: Serveur, Appareil: Appareil, Reseau: Reseau, Operation: Operation, LienCoupe: LienCoupe,
+  ROLE_PERMS: ROLE_PERMS, permOk: permOk, nouveauMonde: nouveauMonde, libelle: libelle,
+  STATUTS_LIBELLES: STATUTS_LIBELLES, runBanc: runBancComplet, sha256Hex: sha256Hex, hmacSha256Hex: hmacSha256Hex
+};
+if (typeof module !== "undefined" && module.exports) module.exports = ADLCI;
+if (typeof window !== "undefined") window.ADLCI = ADLCI;
+
+</script>
+
+<script>
+/* ======================================================================
+   Interface de démonstration du prototype (au-dessus du moteur)
+   ====================================================================== */
+var monde = ADLCI.nouveauMonde();
+var APPAREILS = { A: monde.A, B: monde.B, C: monde.C };
+var LIBELLES_APPAREILS = {
+  A: { nom: "Téléphone du trésorier", role: "Trésorier", user: "u_tresorier" },
+  B: { nom: "Téléphone du secrétaire", role: "Secrétaire général", user: "u_secretaire" },
+  C: { nom: "Tablette de l'administrateur", role: "Administrateur", user: "u_admin" }
+};
+var actif = "A";
+var logs = [];
+var REUNION = "R-2026-11-15";
+var decisions = {};   // conflits déjà soumis à l'arbitrage
+
+function app() { return APPAREILS[actif]; }
+function heure() { return new Date().toTimeString().slice(0, 8); }
+function log(txt, cls) {
+  logs.unshift({ t: heure(), txt: txt, cls: cls || "" });
+  if (logs.length > 16) logs.pop();
+}
+function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+function fcfa(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " FCFA"; }
+function court(id) { return id ? id.slice(0, 8) + "…" : ""; }
+
+/* ---------- bandeau de synchronisation (RG-H4) ---------- */
+function majBandeau() {
+  var a = app();
+  var n = a.outbox.filter(function (o) { return o.status === "pending" || o.status === "in_flight"; }).length;
+  var enLigne = monde.reseau.disponible;
+  document.getElementById("etatReseau").className = "etat-reseau " + (enLigne ? "en-ligne" : "hors-ligne");
+  document.getElementById("txtReseau").textContent = enLigne ? "En ligne" : "Hors ligne — mode attente";
+  document.getElementById("btnReseau").textContent = enLigne ? "Couper le réseau" : "Rétablir le réseau";
+  var badge = document.getElementById("txtAttente");
+  if (n > 0) { badge.className = "badge b-attente"; badge.textContent = n + " opération" + (n > 1 ? "s" : "") + " en attente — NON validées"; }
+  else if (a.conflits.length > 0) { badge.className = "badge b-conflit"; badge.textContent = a.conflits.length + " conflit(s) à arbitrer"; }
+  else { badge.className = "badge b-valide"; badge.textContent = "Tout est synchronisé"; }
+}
+
+/* ---------- appareils ---------- */
+function rendreAppareils() {
+  var html = "";
+  ["A", "B", "C"].forEach(function (id) {
+    html += '<div class="appareil' + (id === actif ? " actif" : "") + '" onclick="choisirAppareil(\'' + id + '\')">'
+      + '<b>' + esc(LIBELLES_APPAREILS[id].nom) + '</b><small>Rôle : ' + esc(LIBELLES_APPAREILS[id].role)
+      + ' · ' + APPAREILS[id].outbox.filter(function (o) { return o.status === "pending" || o.status === "in_flight"; }).length
+      + ' en attente</small></div>';
+  });
+  document.getElementById("listeAppareils").innerHTML = html;
+  var a = app(), p = a.snapshotPerms;
+  document.getElementById("cartesAppareil").innerHTML =
+    '<div class="mini"><span>Appareil actif</span><b>' + esc(LIBELLES_APPAREILS[actif].nom) + '</b></div>'
+    + '<div class="mini"><span>Droits d\u2019écriture (snapshot)</span><b>' + (p.ecrire.length ? p.ecrire.map(esc).join(", ") : "aucun") + '</b></div>'
+    + '<div class="mini"><span>Opérations journalisées (appareil)</span><b>' + a.outbox.length + '</b></div>'
+    + '<div class="mini"><span>Conflits à arbitrer</span><b>' + a.conflits.length + '</b></div>';
+}
+function choisirAppareil(id) { actif = id; log("Appareil actif : " + LIBELLES_APPAREILS[id].nom, "info"); rendreTout(); }
+
+/* ---------- réseau ---------- */
+function basculerReseau() {
+  if (monde.reseau.disponible) {
+    monde.reseau.disponible = false;
+    log("Réseau coupé — l'application continue en mode attente", "alerte");
+  } else {
+    monde.reseau.restaurer();
+    log("Événement « online » : retour de la connexion", "succes");
+    var n = 0;
+    ["A", "B", "C"].forEach(function (id) {
+      var r = APPAREILS[id].synchroniser();
+      if (r.envoyes > 0) { log("Synchronisation automatique de " + LIBELLES_APPAREILS[id].nom + " : " + r.envoyes + " opération(s)", "succes"); n += r.envoyes; }
+    });
+    if (n === 0) log("Aucune opération en attente à synchroniser", "info");
+  }
+  rendreTout();
+}
+function syncMaintenant() {
+  var r = app().synchroniser();
+  log(r.envoyes > 0 ? "Synchronisation de " + LIBELLES_APPAREILS[actif].nom + " : " + r.envoyes + " opération(s) envoyée(s)"
+    : (monde.reseau.disponible ? "Rien à synchroniser" : "Réseau indisponible — synchronisation impossible"),
+    r.envoyes > 0 ? "succes" : "info");
+  rendreTout();
+}
+
+/* ---------- cotisations ---------- */
+function paiementsCache(a) {
+  var out = [];
+  Object.keys(a.cache).forEach(function (k) {
+    if (k.indexOf("paiement:") === 0) {
+      var rec = a.lire(k);
+      var recu = "—";
+      a.outbox.forEach(function (o) { if (o.result && o.result.entite === k && o.result.numero_recu) recu = o.result.numero_recu; });
+      if (rec && !rec.__corrompu__ && k === "paiement:PAI-0001") recu = "REC-000001";
+      out.push({ cle: k, rec: rec, recu: recu });
+    }
+  });
+  return out;
+}
+function rendreCotisations() {
+  var a = app(), tot = a.totauxPaiements();
+  document.getElementById("tConf").textContent = fcfa(tot.total_confirme);
+  document.getElementById("tAttente").textContent = fcfa(tot.total_en_attente);
+  document.getElementById("tProv").textContent = fcfa(tot.total_provisoire);
+  var html = "<tr><th>Membre</th><th>Motif</th><th>Période</th><th class='num'>Montant</th><th>Reçu</th><th>État</th></tr>";
+  var liste = paiementsCache(a);
+  if (!liste.length) html += "<tr><td colspan='6' style='color:var(--ink-3)'>Aucune cotisation synchronisée sur cet appareil.</td></tr>";
+  liste.forEach(function (p) {
+    var c = p.rec.champs;
+    html += "<tr><td>" + esc(nomMembre(c.membre)) + "</td><td>" + esc(c.motif) + "</td><td>" + esc(c.periode)
+      + "</td><td class='num'>" + fcfa(c.montant) + "</td><td>" + esc(p.recu) + "</td>"
+      + "<td class='statut-cell'><span class='badge b-valide'>Validé</span></td></tr>";
+  });
+  a.outbox.forEach(function (o) {
+    if (o.entityType !== "paiement") return;
+    if (o.status === "pending" || o.status === "in_flight") {
+      html += "<tr><td>" + esc(nomMembre(o.payload.membre)) + "</td><td>" + esc(o.payload.motif) + "</td><td>" + esc(o.payload.periode)
+        + "</td><td class='num'>" + fcfa(o.payload.montant) + "</td><td>—</td>"
+        + "<td class='statut-cell'><span class='badge " + (o.status === "pending" ? "b-attente" : "b-neutre") + "'>"
+        + (o.status === "pending" ? "En attente — NON validé" : "Résultat inconnu") + "</span></td></tr>";
+    } else if (o.status === "rejected") {
+      html += "<tr><td>" + esc(nomMembre(o.payload.membre)) + "</td><td>" + esc(o.payload.motif) + "</td><td>" + esc(o.payload.periode)
+        + "</td><td class='num'>" + fcfa(o.payload.montant) + "</td><td>—</td>"
+        + "<td class='statut-cell'><span class='badge b-rejete'>Rejeté — " + esc(o.reason) + "</span></td></tr>";
+    }
+  });
+  document.getElementById("tabPaiements").innerHTML = html;
+  var sel = document.getElementById("fMembre"), mem = "";
+  Object.keys(a.cache).forEach(function (k) {
+    if (k.indexOf("membre:") === 0 && a.lire(k) && !a.lire(k).__corrompu__ && a.lire(k).champs.statut === "actif") {
+      var c = a.lire(k).champs;
+      mem += "<option value='" + esc(k.replace("membre:", "")) + "'>" + esc(c.nom) + " (" + esc(c.matricule) + ")</option>";
+    }
+  });
+  sel.innerHTML = mem;
+  document.getElementById("btnPaiement").disabled = !a.peutEcrire("paiement");
+}
+function alerteLocale(id, msg) {
+  var el = document.getElementById(id);
+  el.textContent = msg; el.style.display = "block";
+  setTimeout(function () { el.style.display = "none"; }, 4000);
+}
+function saisirPaiement(ev) {
+  if (ev) ev.preventDefault();
+  var a = app();
+  var membre = document.getElementById("fMembre").value;
+  var motif = document.getElementById("fMotif").value;
+  var periode = document.getElementById("fPeriode").value.trim();
+  var montant = Number(document.getElementById("fMontant").value);
+  if (!a.peutEcrire("paiement")) { alerteLocale("alertePaiement", "Refusé par le snapshot de permissions : ce rôle ne peut pas enregistrer de paiements (R8)."); return false; }
+  if (!Number.isInteger(montant) || montant <= 0 || montant > 500000) { alerteLocale("alertePaiement", "Montant invalide : entier positif attendu (contrôle local S7)."); return false; }
+  if (!/^\d{4}-\d{2}$/.test(periode)) { alerteLocale("alertePaiement", "Période invalide : format AAAA-MM attendu."); return false; }
+  var cle = "paiement|" + membre + "|" + motif + "|" + periode;
+  var deja = monde.srv.paiementsParCle[cle];
+  if (deja && monde.srv.entites[deja]) { alerteLocale("alertePaiement", "Refus local : ce paiement (membre, motif, période) existe déjà côté serveur — doublon métier."); return false; }
+  var r = a.saisir("paiement", { membre: membre, motif: motif, periode: periode, montant: montant });
+  if (r[1]) { alerteLocale("alertePaiement", r[1]); return false; }
+  log("Paiement " + fcfa(montant) + " (" + nomMembre(membre) + ", " + esc(motif) + " " + esc(periode) + ") enregistré en ATTENTE — op " + court(r[0].opId), monde.reseau.disponible ? "info" : "alerte");
+  rendreTout();
+  return false;
+}
+
+/* ---------- présence ---------- */
+function etatPresence(membreId, a) {
+  var srv = monde.srv, res = null;
+  Object.keys(srv.entites).forEach(function (k) {
+    var e = srv.entites[k];
+    if (k.indexOf("presence:") === 0 && e.champs.membre === membreId && e.champs.reunion === REUNION) res = { etat: "valide", statut: e.champs.statut };
+  });
+  if (res) return res;
+  var op = a.outbox.filter(function (o) {
+    return o.entityType === "presence" && o.payload.membre === membreId && o.payload.reunion === REUNION
+      && (o.status === "pending" || o.status === "in_flight");
+  })[0];
+  if (op) return { etat: "attente", statut: op.payload.statut };
+  return null;
+}
+function rendrePresence() {
+  var a = app(), droit = a.peutEcrire("presence");
+  var html = "<tr><th>Membre</th><th>État enregistré</th><th>Marquer (4 statuts validés)</th></tr>";
+  ["M001", "M002", "M003", "M004"].forEach(function (id) {
+    var et = etatPresence(id, a);
+    var etatTxt = et ? (et.etat === "valide" ? "<span class='badge b-valide'>Validé — " + esc(et.statut) + "</span>"
+      : "<span class='badge b-attente'>En attente — " + esc(et.statut) + " (NON validé)</span>")
+      : "<span class='badge b-neutre'>Non renseigné</span>";
+    var boutons = "";
+    if (!et && droit) {
+      [["present", "Présent"], ["absent", "Absent"], ["excuse", "Excusé"], ["non_concerne", "Non concerné"]].forEach(function (s) {
+        boutons += '<button class="btn small" onclick="marquerPresence(\'' + id + '\',\'' + s[0] + '\')">' + s[1] + '</button> ';
+      });
+    } else if (!droit) boutons = "<small style='color:var(--ink-3)'>Droits insuffisants sur cet appareil</small>";
+    html += "<tr><td>" + esc(nomMembre(id)) + "</td><td class='statut-cell'>" + etatTxt + "</td><td class='statut-cell'>" + boutons + "</td></tr>";
+  });
+  document.getElementById("tabPresence").innerHTML = html;
+}
+function marquerPresence(membreId, statut) {
+  var r = app().saisir("presence", { membre: membreId, reunion: REUNION, statut: statut });
+  if (r[1]) { log("Refus local : " + r[1], "alerte"); rendreTout(); return; }
+  log("Présence de " + nomMembre(membreId) + " (« " + statut + " ») enregistrée en ATTENTE — op " + court(r[0].opId), monde.reseau.disponible ? "info" : "alerte");
+  rendreTout();
+}
+
+/* ---------- membres ---------- */
+var CONFLITS_UI = [], OUTBOX_UI = [];
+function rendreMembres() {
+  var a = app(), droit = a.peutEcrire("membre");
+  var html = "<tr><th>Matricule</th><th>Nom</th><th>Tribu</th><th>Téléphone</th><th>Quartier</th><th>Version</th><th>Attente</th><th>Modifier</th></tr>";
+  Object.keys(a.cache).forEach(function (k) {
+    if (k.indexOf("membre:") !== 0) return;
+    var rec = a.lire(k);
+    if (!rec || rec.__corrompu__) return;
+    var c = rec.champs, id = k.replace("membre:", "");
+    var enAttente = a.opsEnAttenteSur("membre", id).length;
+    html += "<tr><td>" + esc(c.matricule) + "</td><td>" + esc(c.nom) + "</td><td>" + esc(c.tribu)
+      + "</td><td>" + esc(c.telephone) + "</td><td>" + esc(c.quartier) + "</td><td class='num'>v" + rec.version + "</td>"
+      + "<td class='statut-cell'>" + (enAttente ? "<span class='badge b-attente'>" + enAttente + " modif.</span>" : "—") + "</td>"
+      + "<td class='statut-cell'><input id='tel-" + id + "' value='" + esc(c.telephone) + "' style='width:130px;min-height:30px'>"
+      + "<button class='btn small' " + (droit ? "onclick=\"modifierFiche('" + id + "','telephone')\"" : "disabled") + ">Tél.</button> "
+      + "<input id='qua-" + id + "' value='" + esc(c.quartier) + "' style='width:100px;min-height:30px'>"
+      + "<button class='btn small' " + (droit ? "onclick=\"modifierFiche('" + id + "','quartier')\"" : "disabled") + ">Quart.</button></td></tr>";
+  });
+  document.getElementById("tabMembres").innerHTML = html;
+  if (!droit) document.getElementById("alerteMembre").style.display = "none";
+}
+function modifierFiche(id, champ) {
+  var a = app();
+  var val = document.getElementById((champ === "telephone" ? "tel-" : "qua-") + id).value.trim();
+  var rec = a.lire("membre:" + id);
+  if (!val) { alerteLocale("alerteMembre", "Valeur vide : modification refusée."); return; }
+  if (val === rec.champs[champ]) { alerteLocale("alerteMembre", "Aucun changement."); return; }
+  var r = a.saisir("membre", pair(champ, val), id, rec.version);
+  if (r[1]) { alerteLocale("alerteMembre", "Refusé : " + r[1] + " (R8)."); return; }
+  log("Modification de la fiche " + nomMembre(id) + " (" + champ + " → « " + val + " ») en ATTENTE sur base v" + rec.version + " — op " + court(r[0].opId), monde.reseau.disponible ? "info" : "alerte");
+  rendreTout();
+}
+function pair(k, v) { var o = {}; o[k] = v; return o; }
+
+/* ---------- outbox ---------- */
+function rendreOutbox() {
+  var a = app();
+  OUTBOX_UI = a.outbox.slice().reverse();
+  var html = "<tr><th>Opération</th><th>Contenu</th><th>État</th><th>Essais</th><th></th></tr>";
+  if (!OUTBOX_UI.length) html += "<tr><td colspan='5' style='color:var(--ink-3)'>File vide : aucune opération sur cet appareil.</td></tr>";
+  OUTBOX_UI.forEach(function (o, i) {
+    var cls = { pending: "b-attente", in_flight: "b-neutre", confirmed: "b-valide", rejected: "b-rejete", conflict: "b-conflit", annule: "b-annule" }[o.status];
+    var contenu = "";
+    if (o.entityType === "paiement") contenu = nomMembre(o.payload.membre) + " · " + o.payload.motif + " " + o.payload.periode + " · " + fcfa(o.payload.montant);
+    else if (o.entityType === "presence") contenu = nomMembre(o.payload.membre) + " · " + o.payload.reunion + " · " + o.payload.statut;
+    else if (o.entityType === "participation") contenu = nomMembre(o.payload.membre) + " · " + o.payload.activite + " · " + o.payload.statut;
+    else if (o.entityType === "membre") contenu = nomMembre(o.entityId) + " · " + Object.keys(o.payload).join(", ") + " « " + o.payload[Object.keys(o.payload)[0]] + " » (base v" + o.baseVersion + ")";
+    var detail = "";
+    if (o.status === "confirmed" && o.result && o.result.numero_recu) detail = " · reçu " + o.result.numero_recu;
+    if (o.replay) detail += " · ⚑ replay";
+    if (o.reason) detail += " · " + o.reason;
+    var annule = (o.status === "pending") ? '<button class="btn small" onclick="annulerOp(' + i + ')">Annuler</button>' : "";
+    html += "<tr><td style='font-family:var(--f-num);font-size:.72rem'>" + court(o.opId) + "</td><td>" + esc(contenu)
+      + "</td><td class='statut-cell'><span class='badge " + cls + "'>" + esc(ADLCI.STATUTS_LIBELLES[o.status].split("]")[0].replace("[", "") + detail) + "</span></td>"
+      + "<td class='num'>" + o.tentatives + "</td><td>" + annule + "</td></tr>";
+  });
+  document.getElementById("tabOutbox").innerHTML = html;
+}
+function annulerOp(i) {
+  var o = OUTBOX_UI[i];
+  if (!o || o.status !== "pending") return;
+  o.status = "annule";
+  log("Opération " + court(o.opId) + " annulée localement (elle n'a jamais été envoyée au serveur)", "info");
+  rendreTout();
+}
+
+/* ---------- conflits ---------- */
+var SYS_CONFLITS = [];
+function rendreConflits() {
+  var a = app();
+  CONFLITS_UI = a.conflits.slice();
+  var html = "";
+  if (!CONFLITS_UI.length) html += "<p style='color:var(--ink-3);font-size:.85rem'>Aucun conflit local sur cet appareil.</p>";
+  CONFLITS_UI.forEach(function (c, i) {
+    var soumis = decisions[c.opId];
+    var isAdmin = app().userId === "u_admin";
+    html += "<div class='conflit-box'><b>" + esc(nomMembre(c.entite.replace("membre:", ""))) + "</b> — " + esc(c.raison)
+      + " (version serveur v" + c.versionServeur + ", votre proposition conservée : « " + esc(Object.values(c.payload).join(", ")) + " »)"
+      + "<br><small>La proposition n'a PAS été appliquée : décision requise avant toute écriture (R4, R5).</small><br>"
+      + (soumis ? "<span class='badge b-valide'>Fusion transmise — en attente de confirmation</span>"
+        : "<button class='btn accent small' style='margin-top:6px' " + (isAdmin ? "onclick='resoudreConflit(" + i + ")'" : "disabled")
+          + ">" + (isAdmin ? "Fusionner (décision admin)" : "Arbitrage réservé à l'administrateur") + "</button>") + "</div>";
+  });
+  if (a.userId === "u_admin") {
+    SYS_CONFLITS = [];
+    Object.keys(monde.srv.journal).forEach(function (opId) {
+      var j = monde.srv.journal[opId];
+      if (j.outcome === "conflict") SYS_CONFLITS.push({ opId: opId, j: j });
+    });
+    html += "<p style='font-weight:600;font-size:.9rem;margin:14px 0 6px'>Conflits système rapportés par le journal du serveur</p>";
+    if (!SYS_CONFLITS.length) html += "<p style='color:var(--ink-3);font-size:.85rem'>Aucun conflit système.</p>";
+    SYS_CONFLITS.forEach(function (sc, i) {
+      var soumis = decisions[sc.opId];
+      var entId = sc.j.op.id;
+      var vals = Object.keys(sc.j.op.payload).map(function (k) { return k + " « " + sc.j.op.payload[k] + " »"; }).join(", ");
+      html += "<div class='conflit-box'><b>" + esc(nomMembre(entId)) + "</b> — " + esc(sc.j.reason)
+        + " (version serveur v" + sc.j.result.version_serveur + "), proposition de " + esc(sc.j.op.type) + " : " + esc(vals)
+        + "<br><small>L'appareil demandeur ne peut pas arbitrer : la décision remonte à l'administrateur, sans jamais écraser la proposition (R4, R5, R8).</small><br>"
+        + (soumis ? "<span class='badge b-valide'>Fusion transmise</span>"
+          : "<button class='btn accent small' style='margin-top:6px' onclick='resoudreConflitSysteme(" + i + ")'>Fusionner (décision admin)</button>")
+        + "</div>";
+    });
+  }
+  document.getElementById("listeConflits").innerHTML = html;
+}
+function resoudreConflit(i) {
+  var a = app(), c = CONFLITS_UI[i];
+  if (a.userId !== "u_admin") { log("Refus : seul l'administrateur peut arbitrer un conflit (R8).", "alerte"); return; }
+  var id = c.entite.split(":")[1];
+  var r = a.saisir("membre", c.payload, id, c.versionServeur);
+  if (r[1]) { log("Refus : " + r[1], "alerte"); return; }
+  decisions[c.opId] = true;
+  log("Décision d'arbitrage enregistrée (fusion sur v" + c.versionServeur + ") — op " + court(r[0].opId), "info");
+  if (monde.reseau.disponible) a.synchroniser();
+  rendreTout();
+}
+function resoudreConflitSysteme(i) {
+  var a = app(), sc = SYS_CONFLITS[i];
+  if (a.userId !== "u_admin") { log("Refus : seul l'administrateur peut arbitrer un conflit (R8).", "alerte"); return; }
+  if (sc.j.op.type !== "membre") { log("Arbitrage non prévu pour ce type d'entité (voir S6).", "alerte"); return; }
+  var r = a.saisir("membre", sc.j.op.payload, sc.j.op.id, sc.j.result.version_serveur);
+  if (r[1]) { log("Refus : " + r[1], "alerte"); return; }
+  decisions[sc.opId] = true;
+  log("Décision d'arbitrage système enregistrée (fusion sur v" + sc.j.result.version_serveur + ") — op " + court(r[0].opId), "info");
+  if (monde.reseau.disponible) a.synchroniser();
+  rendreTout();
+}
+
+/* ---------- journal serveur ---------- */
+function rendreJournal() {
+  var s = monde.srv;
+  document.getElementById("cartesJournal").innerHTML =
+    '<div class="mini"><span>Opérations appliquées</span><b>' + s.stats.applied + '</b></div>'
+    + '<div class="mini"><span>Rejets explicites</span><b>' + s.stats.rejected + '</b></div>'
+    + '<div class="mini"><span>Conflits détectés</span><b>' + s.stats.conflict + '</b></div>'
+    + '<div class="mini"><span>Replays neutralisés (⚑)</span><b>' + s.stats.replayed + '</b></div>';
+  var html = "<tr><th>op_id</th><th>Verdict</th><th>Détail</th><th class='num'>Seq.</th></tr>";
+  var keys = Object.keys(s.journal).slice(-24).reverse();
+  if (!keys.length) html += "<tr><td colspan='4' style='color:var(--ink-3)'>Journal vide : aucune opération encore reçue par le serveur.</td></tr>";
+  keys.forEach(function (opId) {
+    var j = s.journal[opId];
+    var cls = { applied: "b-valide", rejected: "b-rejete", conflict: "b-conflit" }[j.outcome];
+    var txt = { applied: "Appliquée", rejected: "Rejetée", conflict: "Conflit" }[j.outcome];
+    var detail = (j.reason ? j.reason : "");
+    if (j.result && j.result.numero_recu) detail += " · reçu " + j.result.numero_recu;
+    if (j.result && j.result.entite) detail += " · " + j.result.entite;
+    html += "<tr><td style='font-family:var(--f-num);font-size:.72rem'>" + court(opId) + "</td>"
+      + "<td class='statut-cell'><span class='badge " + cls + "'>" + txt + "</span></td>"
+      + "<td>" + esc(detail || "—") + "</td><td class='num'>" + (j.result && j.result.server_seq ? j.result.server_seq : "—") + "</td></tr>";
+  });
+  document.getElementById("tabJournal").innerHTML = html;
+}
+
+/* ---------- journal de démo ---------- */
+function rendreLog() {
+  var html = "";
+  logs.forEach(function (l) {
+    html += "<li class='" + l.cls + "'><span class='t'>" + l.t + "</span>" + esc(l.txt) + "</li>";
+  });
+  document.getElementById("logDemo").innerHTML = html || "<li>—</li>";
+}
+
+/* ---------- banc de tests ---------- */
+function executerBanc() {
+  var t0 = performance.now();
+  var r = ADLCI.runBanc().bilan;
+  var ms = (performance.now() - t0).toFixed(1);
+  document.getElementById("bancDuree").textContent = "Exécuté en " + ms + " ms — monde de démonstration intact.";
+  var html = "<div class='scroll-x'><table><tr><th>Scénario</th><th>Règles</th><th>Vérifs</th><th>Verdict</th></tr>";
+  r.forEach(function (b) {
+    html += "<tr><td>" + esc(b.nom) + "</td><td>" + esc(b.regles) + "</td><td class='num'>" + b.okCount + "/" + b.nb + "</td>"
+      + "<td class='statut-cell'><span class='badge " + (b.ok ? "b-valide" : "b-rejete") + "'>" + (b.ok ? "PASS" : "FAIL") + "</span></td></tr>";
+  });
+  var totOk = r.filter(function (b) { return b.ok; }).length;
+  var vOk = r.reduce(function (a, b) { return a + b.okCount; }, 0);
+  var vTot = r.reduce(function (a, b) { return a + b.nb; }, 0);
+  html += "</table></div><p><b>Résultat global : " + totOk + "/" + r.length + " scénarios PASS — " + vOk + "/" + vTot
+    + " vérifications individuelles satisfaites.</b> Détail par scénario :</p>";
+  r.forEach(function (b) {
+    html += "<details class='spec'><summary>" + esc(b.nom) + " — " + (b.ok ? "PASS" : "FAIL") + " (" + b.okCount + "/" + b.nb + ")</summary><div class='contenu'>";
+    b.resultats.forEach(function (x) {
+      html += "<div><span class='" + (x[0] ? "v-ok" : "v-ko") + "'>[" + (x[0] ? "OK" : "ÉCHEC") + "]</span> " + esc(x[1]) + "</div>";
+    });
+    html += "</div></details>";
+  });
+  document.getElementById("bancOut").innerHTML = html;
+  log("Banc de tests exécuté : " + totOk + "/" + r.length + " scénarios PASS (" + vOk + "/" + vTot + " vérifications)", "succes");
+}
+
+/* ---------- console d'intrusion ---------- */
+function intrusionLigne(id, ok, txt) {
+  var div = document.createElement("div");
+  div.innerHTML = "<span class='" + (ok ? "v-ok" : "v-ko") + "'>[" + (ok ? "REFUS MAINTENU" : "ÉCHEC DE L'ESSAI") + "]</span> I" + id + " — " + esc(txt);
+  document.getElementById("intrusionOut").appendChild(div);
+}
+function intrusion(n) {
+  if (n === 1) {
+    var m = ADLCI.nouveauMonde();
+    m.srv.users.u_membre = { role: "membre", actif: true };
+    var D = new ADLCI.Appareil("Telephone-Membre", "u_membre", m.srv, m.reseau);
+    D.snapshotPermissions(m.srv); D.chargerCacheDepuis(m.srv, Object.keys(m.srv.entites));
+    var r = D.saisir("paiement", { membre: "M001", motif: "tranche", periode: "2026-11", montant: 4500 });
+    intrusionLigne(1, r[0] === null && r[1] === "PERMISSION_LOCALE_REFUSEE",
+      "saisie d'un paiement en tant que membre ordinaire → refusée à la saisie (snapshot de permissions, R8)");
+  } else if (n === 2) {
+    var m2 = ADLCI.nouveauMonde();
+    var op = m2.A.saisir("paiement", { membre: "M002", motif: "tranche", periode: "2026-11", montant: 4500 })[0];
+    m2.A.synchroniser();
+    var avant = Object.keys(m2.srv.journal).length;
+    var rep = m2.srv.apply(op);
+    var apres = Object.keys(m2.srv.journal).length;
+    intrusionLigne(2, rep.replay === true && avant === apres && m2.srv.nbPaiements("M002", "tranche", "2026-11") === 1,
+      "réécriture directe du même op_id → verdict d'origine renvoyé, journal inchangé (" + avant + " entrée), un seul paiement (R2)");
+  } else if (n === 3) {
+    var m3 = ADLCI.nouveauMonde();
+    m3.A.cache["paiement:PAI-0001"].champs.montant = 999999;
+    var lu = m3.A.lire("paiement:PAI-0001");
+    intrusionLigne(3, lu.__corrompu__ === true && m3.srv.entites["paiement:PAI-0001"].champs.montant === 4500,
+      "falsification du montant en cache → empreinte HMAC invalide, enregistrement exclu, serveur intact (R7)");
+  } else if (n === 4) {
+    var m4 = ADLCI.nouveauMonde();
+    intrusionLigne(4, ADLCI.permOk("secretaire", "resoudre_conflit") === false && ADLCI.permOk("admin", "resoudre_conflit") === true,
+      "arbitrage d'un conflit par un secrétaire → refusé ; réservé au rôle administrateur (R8)");
+  } else if (n === 5) {
+    var m5 = ADLCI.nouveauMonde();
+    var op5 = m5.A.saisir("paiement", { membre: "M003", motif: "tranche", periode: "2026-12", montant: -100000 }, null, 0, true)[0];
+    m5.A.synchroniser();
+    intrusionLigne(5, op5.status === "rejected" && op5.reason === "MONTANT_INVALIDE",
+      "client défectueux forçant un montant négatif → revalidation serveur intégrale : rejet MONTANT_INVALIDE, rien comptabilisé (R6)");
+  }
+}
+
+/* ---------- helpers communs ---------- */
+function nomMembre(id) {
+  var e = monde.srv.entites["membre:" + id];
+  return e ? e.champs.nom : id;
+}
+function rendreTout() {
+  majBandeau(); rendreAppareils(); rendreCotisations(); rendrePresence();
+  rendreMembres(); rendreOutbox(); rendreConflits(); rendreJournal(); rendreLog();
+}
+
+/* ---------- initialisation ---------- */
+log("Monde initialisé : 4 membres (registre 6f), 1 cotisation de référence (octobre), réunion du 15 ouverte", "info");
+log("Astuce : coupez le réseau, saisissez depuis deux appareils, rétablissez — observez la file, les conflits et le journal", "info");
+rendreTout();
+</script>
+</body>
+</html>

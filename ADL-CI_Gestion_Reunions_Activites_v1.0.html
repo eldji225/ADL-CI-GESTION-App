@@ -1,0 +1,1552 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADL-CI GESTION — Module réunions et activités v1.0</title>
+<!--
+  ADL-CI GESTION — Module réunions et activités v1.0
+  Association pour le Développement de Laabha — Section Côte d'Ivoire
+  Prototype autonome. Il applique les règles validées par le bureau (A1 à A6) :
+    A1   : taux de présence = présents ÷ (présents + absents) — l'absence excusée est exclue
+           du numérateur et du dénominateur (elle ne pénalise pas, ni positivement).
+    A2   : réunion ordinaire et assemblée générale → tous les membres actifs pré-marqués
+           « concernés » (ajustable) ; les 4 autres types → sélection manuelle obligatoire.
+    A3   : le secrétaire général et l'administrateur créent, saisissent et corrigent ;
+           consultation ouverte à tous ; correction avec motif obligatoire, journalisée,
+           sans approbation présidentielle (contrairement aux corrections financières V7).
+    A4   : le statut « absent excusé » exige un motif ; pièce justificative facultative.
+    A5   : cycle de vie planifié → terminé ; annulation possible avec trace ;
+           un événement annulé est exclu des statistiques et de l'évaluation des membres.
+    A6   : générateur « Réunion ordinaire du 15 » (articulation avec V11.1 : les réunions
+           se tiennent chaque 15 du mois — séance de référence du règlement des cotisations).
+  Règles du cahier des charges du module : une seule présence par membre et par événement ;
+  un membre n'est évalué que pour les événements auxquels il était concerné ; les corrections
+  sont historisées (journal append-only, aucune suppression).
+  Types imposés : réunion ordinaire, assemblée générale, activité sociale, activité culturelle,
+  action de développement, autre activité associative.
+  Statuts imposés : présent, absent, absent excusé, non concerné.
+  Production visée (AT-1) : Node.js + Express / PostgreSQL / IndexedDB (Dexie).
+-->
+<style>
+:root{
+  --bg:#F6F3EC; --bg-soft:#EFEAE0; --bg-deep:#E7E1D3;
+  --primary:#2A4A3A; --primary-deep:#1D362B; --primary-soft:#3D6B54;
+  --accent:#C89F62; --accent-soft:#E9DBBE; --accent-faint:#F3ECD9;
+  --ink:#1C1B18; --ink-2:#4A473F; --ink-3:#7A7466;
+  --card:#FFFFFF; --line:#DCD5C6; --line-soft:#E8E2D4;
+  --ok:#2F7D4F; --ok-bg:#E6F1E9; --warn:#B97E1C; --warn-bg:#F7EEDC;
+  --danger:#A63D2F; --danger-bg:#F5E5E1; --info:#3E6C8E; --info-bg:#E4EDF3;
+  --shadow:0 1px 2px rgba(28,27,24,.06),0 4px 14px rgba(28,27,24,.08);
+  --shadow-lg:0 8px 30px rgba(28,27,24,.16);
+  --r:14px;
+  --f-title:'Lora',Georgia,serif; --f-ui:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --f-num:'IBM Plex Mono',ui-monospace,monospace;
+  --touch:44px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--f-ui);font-size:15px;line-height:1.55;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+button{font:inherit;cursor:pointer}
+input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3,h4{font-family:var(--f-title);font-weight:600;line-height:1.25;color:var(--primary)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px;border-radius:4px}
+.wrap{max-width:1180px;margin:0 auto;padding:22px 26px 80px}
+.top{position:sticky;top:0;z-index:50;background:var(--primary);color:#fff;padding:12px 26px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.top .logo{display:flex;align-items:center;gap:11px}
+.top .logo img{width:38px;height:38px}
+.top b{font-family:var(--f-title);font-size:17px;letter-spacing:.04em;display:block}
+.top small{font-size:10.5px;color:rgba(255,255,255,.65);letter-spacing:.08em;text-transform:uppercase;display:block}
+.top .who{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:13px}
+.top .who .ava{width:36px;height:36px;border-radius:50%;background:var(--accent);color:var(--primary-deep);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
+.top .who b{font-size:13.5px;font-family:var(--f-ui)}
+.top .who small{font-size:10px;text-transform:none;letter-spacing:0;color:var(--accent)}
+.topnav{background:var(--primary-deep);padding:0 14px;display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.topnav button{flex-shrink:0;background:none;border:none;color:rgba(255,255,255,.78);padding:12px 15px;font-size:13.5px;font-weight:600;border-bottom:3px solid transparent;min-height:var(--touch)}
+.topnav button.on{color:#fff;border-bottom-color:var(--accent)}
+.topnav button:hover{color:#fff}
+.tab{display:none}
+.tab.on{display:block;animation:fadein .25s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:var(--touch);padding:0 17px;border-radius:11px;border:1px solid transparent;font-weight:600;font-size:14px;transition:background .15s}
+.btn.pri{background:var(--primary);color:#fff}.btn.pri:hover{background:var(--primary-deep)}
+.btn.gold{background:var(--accent);color:var(--primary-deep)}.btn.gold:hover{background:#B9905A}
+.btn.ghost{background:#fff;color:var(--primary);border-color:var(--line)}.btn.ghost:hover{background:var(--bg-soft)}
+.btn.danger{background:var(--danger);color:#fff}.btn.danger:hover{background:#8F3226}
+.btn.sm{min-height:36px;padding:0 12px;font-size:12.5px;border-radius:9px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.card .card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 20px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+.card .card-h h2{font-size:16.5px}
+.card .card-b{padding:18px 20px}
+.card .card-b.tight{padding:0}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}
+.note{display:flex;gap:11px;padding:13px 15px;border-radius:12px;font-size:13.5px;border:1px solid;align-items:flex-start}
+.note b{display:block;margin-bottom:2px}
+.note.ok{background:var(--ok-bg);border-color:#CBE3D2;color:#275E3D}
+.note.warn{background:var(--warn-bg);border-color:#EBD9B4;color:#7A5314}
+.note.err{background:var(--danger-bg);border-color:#E7C7BF;color:#7E2E22}
+.note.info{background:var(--info-bg);border-color:#C9DBE7;color:#2C4E66}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.tag.ok{background:var(--ok-bg);color:var(--ok)}
+.tag.warn{background:var(--warn-bg);color:var(--warn)}
+.tag.bad{background:var(--danger-bg);color:var(--danger)}
+.tag.info{background:var(--info-bg);color:var(--info)}
+.tag.neutral{background:var(--bg-deep);color:var(--ink-2)}
+.tag.gold{background:var(--accent-soft);color:#7A5A2B}
+.field{margin-bottom:13px}
+.field label{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:6px}
+.field input,.field select,.field textarea{width:100%;min-height:var(--touch);border:1px solid var(--line);border-radius:10px;padding:10px 13px;background:#fff;font-size:14.5px}
+.field .help{font-size:12px;color:var(--ink-3);margin-top:5px}
+.field.err input,.field.err select,.field.err textarea{border-color:var(--danger);background:var(--danger-bg)}
+.field .errmsg{font-size:12.5px;color:var(--danger);margin-top:5px;display:none}
+.field.err .errmsg{display:block}
+.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table.tbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:560px}
+.tbl th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:700;padding:10px 13px;border-bottom:1px solid var(--line);background:var(--bg-soft);white-space:nowrap}
+.tbl td{padding:10px 13px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl .num{font-family:var(--f-num);text-align:right;white-space:nowrap}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px 18px}
+.kpi .lab{font-size:12px;color:var(--ink-3);font-weight:600}
+.kpi .val{font-family:var(--f-num);font-size:25px;font-weight:600;color:var(--primary);margin-top:5px;font-variant-numeric:tabular-nums}
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.ava{width:38px;height:38px;border-radius:50%;background:var(--accent-soft);color:#7A5A2B;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0}
+.cell-name{display:flex;align-items:center;gap:11px;min-width:0}
+.cell-name .n b{display:block;font-size:13.5px;white-space:nowrap}
+.cell-name .n small{color:var(--ink-3);font-size:11.5px}
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:22px 0 16px}
+.head h1{font-size:25px}
+.head .sub{color:var(--ink-3);font-size:13.5px;margin-top:3px;max-width:780px}
+.searchbar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+.searchbar .field{margin:0;flex:1;min-width:160px}
+.mat{font-family:var(--f-num);font-size:12px;background:var(--accent-faint);border:1px solid var(--accent-soft);border-radius:7px;padding:2px 8px;color:#7A5A2B;white-space:nowrap}
+.dl{display:grid;grid-template-columns:auto 1fr;gap:7px 16px;font-size:13.5px}
+.dl dt{color:var(--ink-3);white-space:nowrap}
+.dl dd{min-width:0;word-break:break-word}
+.mois-chip{display:inline-block;font-family:var(--f-num);font-size:11.5px;border-radius:7px;padding:2px 8px;margin:2px 3px 2px 0}
+.mois-chip.du{background:var(--warn-bg);color:var(--warn);border:1px solid #EBD9B4}
+.mois-chip.paye{background:var(--ok-bg);color:var(--ok);border:1px solid #CBE3D2}
+.mois-chip.partiel{background:var(--danger-bg);color:var(--danger);border:1px solid #E7C7BF}
+.mois-chip.avance{background:var(--info-bg);color:var(--info);border:1px solid #C9DBE7}
+.af-box{background:var(--accent-faint);border:1px solid var(--accent-soft);border-radius:11px;padding:12px 14px;font-size:13.5px}
+.af-row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--accent-soft);font-size:13px}
+.af-row:last-child{border-bottom:none}
+.af-total{font-weight:700;border-top:2px solid var(--accent);margin-top:5px;padding-top:8px}
+.badge-v{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;background:var(--info-bg);color:var(--info);border:1px solid #C9DBE7;border-radius:6px;padding:2px 8px;vertical-align:middle}
+.step-head{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+.step-num{width:26px;height:26px;border-radius:50%;background:var(--primary);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0}
+.console{background:#152420;color:#D8E6DD;border-radius:12px;padding:14px 16px;font-family:var(--f-num);font-size:12.5px;line-height:1.6;overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+.console .k{color:#8FD0A9}.console .r{color:#F0A392}.console .g{color:#E9C88F}
+.attack{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+.attack:last-child{border-bottom:none}
+.attack .desc{flex:1;min-width:220px}
+.attack .desc b{display:block;font-size:13.5px}
+.attack .desc small{color:var(--ink-3);font-size:12px}
+.bench-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.verdict{font-weight:700;font-family:var(--f-num);font-size:12.5px}
+.verdict.p{color:var(--ok)}.verdict.f{color:var(--danger)}
+details.sc{border:1px solid var(--line-soft);border-radius:10px;margin:0 0 8px;background:#fff}
+details.sc summary{list-style:none;display:flex;gap:10px;align-items:center;padding:10px 14px;font-size:13px;cursor:pointer;flex-wrap:wrap}
+details.sc summary::-webkit-details-marker{display:none}
+details.sc .body{padding:10px 14px;border-top:1px solid var(--line-soft);font-size:12.5px;color:var(--ink-2);background:var(--bg-soft);border-radius:0 0 10px 10px}
+.grp-h{font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:700;margin:18px 0 10px}
+#toasts{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:150;display:flex;flex-direction:column;gap:8px;width:min(480px,calc(100vw - 24px))}
+.toast{background:var(--primary-deep);color:#fff;border-radius:12px;padding:12px 16px;font-size:13.5px;box-shadow:var(--shadow-lg);animation:fadein .25s}
+.toast.err{background:#843023}.toast.ok{background:#245C3B}
+.login-err{display:none;background:var(--danger-bg);border:1px solid #E7C7BF;color:#7E2E22;border-radius:10px;padding:11px 14px;font-size:13px;margin-bottom:14px}
+.login-err.on{display:flex;gap:9px;align-items:flex-start}
+.spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:rot .7s linear infinite;display:none}
+@keyframes rot{to{transform:rotate(360deg)}}
+.btn.busy .spin{display:inline-block}
+.creds{background:var(--accent-faint);border:1px solid var(--accent-soft);border-radius:11px;padding:11px 14px;font-size:12.5px;margin-top:15px}
+.creds code{font-family:var(--f-num);font-size:11.5px;background:#fff;border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+.creds .row{display:flex;justify-content:space-between;gap:8px;padding:3px 0;flex-wrap:wrap}
+.login-wrap{min-height:calc(100vh - 120px);display:grid;grid-template-columns:minmax(330px,42%) 1fr}
+.login-hero{background:var(--primary);color:#fff;padding:44px 40px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden}
+.login-hero::after{content:"";position:absolute;right:-70px;bottom:-70px;width:250px;height:250px;border-radius:50%;border:32px solid rgba(200,159,98,.16)}
+.login-hero h1{color:#fff;font-size:26px;margin:8px 0}
+.login-hero p{color:rgba(255,255,255,.8);font-size:14px;max-width:430px}
+.login-hero ul{list-style:none;display:grid;gap:11px;margin-top:20px}
+.login-hero li{display:flex;gap:10px;font-size:13.5px;color:rgba(255,255,255,.86)}
+.login-hero li b{color:var(--accent)}
+.login-hero .foot{font-size:11.5px;color:rgba(255,255,255,.55);position:relative;z-index:1}
+.login-form{display:flex;align-items:center;justify-content:center;padding:30px 20px;background:var(--bg)}
+.login-card{width:100%;max-width:410px}
+.login-card h2{font-size:21px;margin-bottom:4px}
+.af-total-row{display:flex;justify-content:space-between;font-weight:800;font-size:13px;margin-top:6px}
+.pres-opts{display:flex;gap:6px;flex-wrap:wrap}
+.pres-opts label{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:11.5px;cursor:pointer;user-select:none;background:#fff;white-space:nowrap}
+.pres-opts input{accent-color:var(--primary)}
+.pres-x{display:flex;flex-direction:column;gap:5px;min-width:170px}
+.pres-x input{border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:12px;background:#fff;min-height:30px}
+.pres-x input:disabled{background:var(--bg-soft);color:var(--ink-3)}
+.chk-list{display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;font-size:13px;max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff}
+.chk-list label{display:flex;align-items:center;gap:7px;white-space:nowrap;overflow:hidden;cursor:pointer}
+.chk-list input{accent-color:var(--primary)}
+.contrat-pre{background:#152420;color:#D8E6DD;border-radius:12px;padding:14px 16px;font-family:var(--f-num);font-size:11.5px;line-height:1.55;overflow:auto;max-height:440px;white-space:pre}
+.mono{font-family:var(--f-num);font-size:12px}
+@media(max-width:900px){.g2,.g3,.kpi-row,.bench-summary{grid-template-columns:1fr 1fr}.login-wrap{grid-template-columns:1fr}.login-hero{padding:30px 24px}.login-hero ul{display:none}.wrap{padding:16px 14px 70px}.top{padding:10px 14px}}
+@media(max-width:640px){.g2,.g3,.kpi-row,.bench-summary{grid-template-columns:1fr}.tbl-wrap{overflow:visible}table.tbl{min-width:0;border:none}.tbl thead{display:none}.tbl tr{display:block;background:#fff;border:1px solid var(--line);border-radius:12px;margin:0 0 10px;padding:6px 4px;box-shadow:var(--shadow)}.tbl td{display:flex;justify-content:space-between;align-items:center;gap:12px;border:none;padding:8px 12px;min-width:0}.tbl td>*{max-width:100%;word-break:break-word}.tbl td::before{content:attr(data-l);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);flex-shrink:0}.tbl td.num{text-align:right}.tbl td.act{justify-content:flex-end}.tbl td.act::before{display:none}.tag{white-space:normal}.dl{grid-template-columns:1fr}.dl dt{margin-top:6px}.dl dd{margin-left:12px}.kpi-row{display:grid;grid-template-columns:1fr 1fr}.chk-list{grid-template-columns:1fr}.mono{word-break:break-all}.badge-v{white-space:normal}.tbl td{flex-wrap:wrap}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="logo"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Ccircle cx='24' cy='24' r='21' fill='%23FFFFFF'/%3E%3Cpath d='M24 10l4.2 8.6 9.5 1.4-6.9 6.7 1.6 9.4L24 31.6l-8.4 4.5 1.6-9.4-6.9-6.7 9.5-1.4z' fill='%232A4A3A'/%3E%3C/svg%3E" alt="">
+  <span><b>ADL-CI GESTION</b><small>Module réunions et activités — v1.0</small></span></div>
+  <div class="who" id="top-who" style="display:none">
+    <span class="ava" id="top-ava">–</span>
+    <span><b id="top-name">–</b><small id="top-role">–</small></span>
+    <button class="btn gold sm" id="btn-logout">Déconnexion</button>
+  </div>
+</header>
+<nav class="topnav" id="topnav" aria-label="Sections"></nav>
+
+<!-- ============ CONNEXION ============ -->
+<div class="tab" id="v-login">
+  <div class="login-wrap">
+    <div class="login-hero">
+      <div>
+        <h1>Réunions et activités</h1>
+        <p>Le module suit la participation réelle des membres à la vie associative : réunions ordinaires, assemblées générales, activités sociales et culturelles, actions de développement. Il applique les règles validées A1 à A6 et prépare les données du futur classement des membres.</p>
+        <ul>
+          <li><b>4 statuts</b> : présent · absent · absent excusé · non concerné — l'excusé est exclu du taux (A1 : il ne pénalise pas).</li>
+          <li><b>Périmètre</b> : un membre n'est évalué que sur les événements auxquels il était concerné (A2).</li>
+          <li><b>Réunion du 15</b> : le générateur préremplit la réunion ordinaire mensuelle (V11.1 — séance de règlement des cotisations).</li>
+          <li><b>Corrections</b> : historisées (qui, quand, ancien → nouveau, motif) — aucune suppression.</li>
+        </ul>
+      </div>
+      <div class="foot">Prototype v1.0 · Production visée : Node.js + Express / PostgreSQL (AT-1) · Données fictives de démonstration · Navigateur moderne requis.</div>
+    </div>
+    <div class="login-form">
+      <div class="login-card">
+        <h2>Connexion</h2>
+        <p style="font-size:13.5px;color:var(--ink-3);margin-bottom:16px">Le secrétaire général et l'administrateur saisissent (A3) ; le bureau consulte ; les membres suivent leur participation.</p>
+        <div id="lg-err" class="login-err" role="alert"><span>⚠️</span><span id="lg-err-txt"></span></div>
+        <form id="login-form" novalidate>
+          <div class="field" id="f-lg-user"><label for="lg-user">Identifiant <span style="color:var(--danger)">*</span></label>
+            <input id="lg-user" type="text" autocomplete="username" placeholder="Ex. : f.cisse"><p class="errmsg">Saisissez votre identifiant.</p></div>
+          <div class="field" id="f-lg-pass"><label for="lg-pass">Mot de passe <span style="color:var(--danger)">*</span></label>
+            <input id="lg-pass" type="password" autocomplete="current-password" placeholder="Votre mot de passe"><p class="errmsg">Saisissez votre mot de passe.</p></div>
+          <button class="btn pri" id="lg-submit" type="submit" style="width:100%">Se connecter <span class="spin"></span></button>
+        </form>
+        <div class="creds">
+          <b style="display:block;margin-bottom:5px">Comptes de démonstration (retirés en production)</b>
+          <div class="row"><span>Secrétaire général — saisie et corrections (A3)</span><code>f.cisse / Secretariat-2026!</code></div>
+          <div class="row"><span>Administrateur — saisie et corrections (A3)</span><code>s.diallo / Admin-2026!CI</code></div>
+          <div class="row"><span>Président — consultation totale</span><code>m.kante / President-2026!</code></div>
+          <div class="row"><span>Trésorier — consultation (saisie financière au module 6h)</span><code>a.traore / Tresor-2026!CI</code></div>
+          <div class="row"><span>Membre du bureau — lecture</span><code>n.aka / Bureau-2026!CI</code></div>
+          <div class="row"><span>Membre ordinaire — consultation + ma participation</span><code>k.yao / Membre-2026!CI</code></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap" id="v-appzone" style="display:none">
+  <!-- ============ ÉVÉNEMENTS ============ -->
+  <div class="tab" id="v-events">
+    <div class="head"><div><h1>Événements et participation</h1><p class="sub" id="ev-sub">Six types imposés (réunion ordinaire, assemblée générale, activité sociale, activité culturelle, action de développement, autre). Date et lieu obligatoires ; réunion ordinaire et AG : tous les actifs pré-marqués concernés (A2). Le taux de présence exclut les absences excusées (A1) et les événements annulés (A5).</p></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap" id="ev-actions">
+        <button class="btn pri" id="btn-create-open">+ Créer un événement</button>
+      </div></div>
+    <div id="panel-create" style="display:none;margin-bottom:16px">
+      <div class="card"><div class="card-h"><h2>Créer un événement (saisie puis résumé à confirmer)</h2><button class="btn ghost sm" id="btn-create-close">Fermer</button></div>
+        <div class="card-b">
+          <div class="grid g2">
+            <div>
+              <div class="step-head"><span class="step-num">1</span><b>Champs de l'événement</b></div>
+              <div class="field" id="f-ev-type"><label for="ev-type">Type <span style="color:var(--danger)">*</span></label><select id="ev-type">
+                <option value="reunion">Réunion ordinaire</option><option value="ag">Assemblée générale</option>
+                <option value="sociale">Activité sociale</option><option value="culturelle">Activité culturelle</option>
+                <option value="developpement">Action de développement</option><option value="autre">Autre activité associative</option></select></div>
+              <div class="field" id="f-ev-titre"><label for="ev-titre">Titre</label><input id="ev-titre" type="text" placeholder="Ex. : Réunion ordinaire de décembre"><p class="help">Facultatif : généré par défaut (type + date).</p></div>
+              <div class="field" id="f-ev-date"><label for="ev-date">Date <span style="color:var(--danger)">*</span></label><input id="ev-date" type="date" min="2025-01-01" max="2027-12-31"><p class="errmsg">La date est obligatoire.</p></div>
+              <div class="field" id="f-ev-lieu"><label for="ev-lieu">Lieu <span style="color:var(--danger)">*</span></label><input id="ev-lieu" type="text" placeholder="Ex. : Siège ADL-CI, Cocody"><p class="errmsg">Le lieu est obligatoire.</p></div>
+              <div class="field" id="f-ev-notes"><label for="ev-notes">Notes (ordre du jour, consignes…)</label><textarea id="ev-notes" rows="2" placeholder="Facultatif"></textarea></div>
+              <div class="field"><label for="ev-gen-mois">Générateur V11.1 · A6 — réunion ordinaire du 15</label>
+                <div style="display:flex;gap:8px"><input id="ev-gen-mois" type="month" min="2025-01" max="2027-12" style="flex:1"><button class="btn gold" id="btn-gen" type="button">Préremplir</button></div>
+                <p class="help">Les réunions ordinaires se tiennent chaque 15 du mois (V11.1) : le générateur fixe la date au 15, le titre, le lieu par défaut et pré-coche les actifs.</p></div>
+            </div>
+            <div>
+              <div class="step-head"><span class="step-num">2</span><b>Membres concernés ou invités (A2)</b></div>
+              <div class="chk-list" id="ev-concernes"><span style="color:var(--ink-3)">Chargement du registre…</span></div>
+              <p class="help" style="margin-top:6px">Réunion ordinaire et AG : les actifs sont pré-cochés automatiquement (ajustable). Activités : sélection manuelle obligatoire. Un membre désactivé peut être invité en l'ajoutant à la main.</p>
+              <button class="btn gold" id="btn-ev-preview" style="width:100%;margin-top:8px">Préparer le résumé (étape 3)</button>
+              <div class="step-head" style="margin-top:12px"><span class="step-num">3</span><b>Résumé à confirmer</b></div>
+              <div id="ev-preview-zone"><div class="note info"><span>ℹ️</span><span><b>Complétez les champs</b> : le résumé (type, date, lieu, périmètre) s'affiche ici avant tout enregistrement.</span></div></div>
+              <div id="ev-confirm-zone" style="display:none;margin-top:10px"><button class="btn pri" id="btn-ev-confirm" style="width:100%">Confirmer et créer l'événement</button><p class="help" style="margin-top:6px">Aucun événement n'est créé avant cette confirmation explicite.</p></div>
+              <div id="ev-result" style="margin-top:10px"></div>
+            </div>
+          </div>
+        </div></div>
+    </div>
+    <div class="kpi-row">
+      <div class="kpi"><span class="lab">Événements terminés (évalués)</span><div class="val" id="k-termine">–</div></div>
+      <div class="kpi"><span class="lab">Présence globale (taux évaluables, A1)</span><div class="val" id="k-taux">–</div></div>
+      <div class="kpi"><span class="lab">Absences enregistrées</span><div class="val" id="k-abs">–</div></div>
+      <div class="kpi"><span class="lab">Absences excusées (hors pénalisation)</span><div class="val" id="k-excuse">–</div></div>
+    </div>
+    <div class="searchbar">
+      <div class="field" style="max-width:260px"><label for="ev-q">Rechercher (titre, lieu)</label><input id="ev-q" type="search" placeholder="Ex. : assemblée, Cocody"></div>
+      <div class="field" style="max-width:240px"><label for="ev-ftype">Type</label><select id="ev-ftype"><option value="">Tous les types</option></select></div>
+      <div class="field" style="max-width:200px"><label for="ev-fstatut">Statut</label><select id="ev-fstatut"><option value="">Tous</option><option value="planifie">Planifié</option><option value="termine">Terminé</option><option value="annule">Annulé</option></select></div>
+    </div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="ev-tbl">
+      <thead><tr><th>Date</th><th>Événement</th><th>Lieu</th><th>Concernés</th><th>Feuille de présence</th><th>Statut</th><th></th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ FEUILLE DE PRÉSENCE ============ -->
+  <div class="tab" id="v-feuille">
+    <div class="head"><div><h1 id="feuille-title">Feuille de présence</h1><p class="sub" id="feuille-sub">Une seule présence par membre et par événement ; la modification d'une présence déjà saisie passe par une correction historisée (ancien → nouveau, motif obligatoire).</p></div>
+      <button class="btn ghost" id="btn-feuille-back">← Retour aux événements</button></div>
+    <div class="grid g2">
+      <div class="card"><div class="card-h"><h2>L'événement</h2><span id="feuille-statut"></span></div><div class="card-b" id="feuille-infos"></div></div>
+      <div class="card"><div class="card-h"><h2>Actions</h2></div><div class="card-b">
+        <div id="feuille-note"></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px" id="feuille-actions">
+          <button class="btn ghost" id="btn-feuille-allp">Tout « présent »</button>
+          <button class="btn pri" id="btn-feuille-save">Enregistrer la feuille</button>
+          <button class="btn gold" id="btn-feuille-closeev">Clôturer l'événement</button>
+          <button class="btn danger" id="btn-feuille-cancel">Annuler l'événement</button>
+        </div></div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>Feuille de présence et périmètre (A2)</h2><span class="tag neutral" id="feuille-count">–</span></div>
+      <div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="feuille-tbl">
+        <thead><tr><th>Membre</th><th>Statut</th><th>Présence saisie</th><th>Motif d'excuse / justificatif</th><th class="act">Action</th></tr></thead>
+        <tbody></tbody></table></div></div></div>
+    <div class="card" style="margin-top:16px;display:none" id="panel-corr">
+      <div class="card-h"><h2>Corriger une participation <span class="badge-v">historisée — ancien → nouveau + motif</span></h2><button class="btn ghost sm" id="btn-corr-cancel">Fermer</button></div>
+      <div class="card-b"><div class="grid g2">
+        <div>
+          <p style="font-size:13.5px;margin-bottom:10px" id="corr-qui">–</p>
+          <div class="field"><label for="corr-statut">Nouveau statut</label><select id="corr-statut"><option value="present">Présent</option><option value="absent">Absent</option><option value="excuse">Absent excusé</option><option value="non_concerne">Non concerné</option></select></div>
+          <div class="field"><label for="corr-motif">Motif de la correction <span style="color:var(--danger)">*</span></label><input id="corr-motif" type="text" placeholder="Ex. : erreur d'appel constatée en réunion du bureau — PV page 2"><p class="help">Minimum 10 caractères : toute correction doit être autorisée, justifiée et traçable.</p></div>
+          <div class="field" id="f-corr-exc"><label for="corr-exc">Motif de l'excuse (si « absent excusé ») <span style="color:var(--danger)">*</span></label><input id="corr-exc" type="text" placeholder="Ex. : convocation bancaire obligatoire"></div>
+          <div class="field" id="f-corr-just"><label for="corr-just">Justificatif (facultatif)</label><input id="corr-just" type="text" placeholder="Ex. : CM-2026-11-08"></div>
+          <button class="btn pri" id="btn-corr-apply">Appliquer la correction</button>
+        </div>
+        <div id="corr-result"></div>
+      </div></div></div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>Journal des corrections de cet événement</h2><span class="tag neutral" id="corr-count">–</span></div>
+      <div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="fc-tbl">
+        <thead><tr><th>Quand</th><th>Auteur</th><th>Membre</th><th>Champ</th><th>Ancien → Nouveau</th><th>Motif</th></tr></thead>
+        <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ ABSENCES ============ -->
+  <div class="tab" id="v-absences">
+    <div class="head"><div><h1>Registre des absences</h1><p class="sub">Toutes les absences des événements terminés : non excusées (nues) et excusées — statut distinct exigeant un motif, avec justificatif facultatif (A4). Les événements annulés ne produisent aucune absence (A5).</p></div></div>
+    <div class="searchbar">
+      <div class="field" style="max-width:300px"><label for="ab-mat">Membre</label><select id="ab-mat"><option value="">Tous les membres</option></select></div>
+      <div class="field" style="max-width:260px"><label for="ab-just">Nature</label><select id="ab-just"><option value="">Toutes les absences</option><option value="excuse">Excusées (justifiées)</option><option value="absent">Non excusées</option></select></div>
+    </div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="ab-tbl">
+      <thead><tr><th>Date</th><th>Événement</th><th>Type</th><th>Membre</th><th>Statut</th><th>Motif d'excuse</th><th>Justificatif</th><th>Saisi par</th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ HISTORIQUE ============ -->
+  <div class="tab" id="v-historique">
+    <div class="head"><div><h1 id="hi-title">Historique des participations</h1><p class="sub">Chronologie complète d'un membre avec agrégats serveur. Un événement « non comptabilisé » est explicitement motivé : annulé (A5), planifié, ou membre non concerné / non évaluable. Le taux applique A1 : les excuses sont hors calcul.</p></div></div>
+    <div class="searchbar" id="hi-select-zone">
+      <div class="field" style="max-width:380px"><label for="hi-mat">Membre</label><select id="hi-mat"></select></div>
+    </div>
+    <div class="grid g2">
+      <div class="card"><div class="card-h"><h2>Agrégats (serveur)</h2></div><div class="card-b" id="hi-infos"></div></div>
+      <div class="card"><div class="card-h"><h2>Chronologie</h2><span class="tag neutral">vert = présent · ambre = absent · bleu = excusé · gris = non compté</span></div><div class="card-b" id="hi-chips"></div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>Détail par événement</h2></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="hi-tbl">
+      <thead><tr><th>Date</th><th>Événement</th><th>Type</th><th>Lieu</th><th>Statut du membre</th><th>Comptabilisé</th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ STATISTIQUES ============ -->
+  <div class="tab" id="v-stats">
+    <div class="head"><div><h1>Statistiques et contrat du classement futur</h1><p class="sub">Par membre, par type, par mois — calculs serveur confrontés à un recalcul indépendant par le banc de tests. La projection « contrat classement » est la donnée exacte que consommera le futur module de classement : champ taux_presence conforme à A1, périmètre d'évaluation explicite (A2), événements exclus motivés (A5).</p></div></div>
+    <div class="kpi-row">
+      <div class="kpi"><span class="lab">Participations évaluables</span><div class="val" id="k-s-eval">–</div></div>
+      <div class="kpi"><span class="lab">Présences</span><div class="val" id="k-s-pres">–</div></div>
+      <div class="kpi"><span class="lab">Absences non excusées</span><div class="val" id="k-s-abs">–</div></div>
+      <div class="kpi"><span class="lab">Taux global de présence (A1)</span><div class="val" id="k-s-taux">–</div></div>
+    </div>
+    <div class="card"><div class="card-h"><h2>Par membre</h2><span class="tag neutral">taux = présents ÷ (présents + absents) — excuses hors calcul (A1)</span></div>
+      <div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="st-membres-tbl">
+        <thead><tr><th>Membre</th><th>Tribu</th><th>Évaluables</th><th>Présents</th><th>Absents</th><th>Excusés</th><th>Non concernés</th><th>Taux</th><th>Historique</th></tr></thead>
+        <tbody></tbody></table></div></div></div>
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card"><div class="card-h"><h2>Par type d'événement</h2></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="st-types-tbl">
+        <thead><tr><th>Type</th><th>Terminés</th><th>Évaluables</th><th>Présents</th><th>Taux</th></tr></thead>
+        <tbody></tbody></table></div></div></div>
+      <div class="card"><div class="card-h"><h2>Par mois</h2></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="st-mois-tbl">
+        <thead><tr><th>Mois</th><th>Terminés</th><th>Évaluables</th><th>Présents</th><th>Taux</th></tr></thead>
+        <tbody></tbody></table></div></div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>Contrat de données du futur classement</h2>
+      <div style="display:flex;gap:10px"><button class="btn ghost sm" id="btn-contrat">Afficher la projection JSON</button><button class="btn ghost sm" id="btn-contrat-export">Exporter (JSON)</button></div></div>
+      <div class="card-b"><p style="font-size:13.5px;color:var(--ink-2);margin-bottom:10px">La projection <span class="mono">stats.ranking</span> expose, pour chaque membre : le périmètre d'évaluation (<span class="mono">evenements_evalues</span>, <span class="mono">sources</span>), les compteurs par statut, le taux conforme à A1 (null si aucun événement évaluable) et la formule documentée. Le banc de tests vérifie l'intégrité structurelle et arithmétique de ce contrat (scénarios T22 à T23).</p>
+      <div id="st-contrat-zone" style="display:none"><pre class="contrat-pre" id="st-contrat">—</pre></div></div></div>
+  </div>
+
+  <!-- ============ MA PARTICIPATION ============ -->
+  <div class="tab" id="v-own">
+    <div class="head"><div><h1>Ma participation</h1><p class="sub">Votre chronologie et vos agrégats, calculés par le serveur. Un membre n'est évalué que sur les événements où il était concerné (A2) ; les absences excusées n'entrent ni au numérateur ni au dénominateur (A1).</p></div></div>
+    <div class="grid g2">
+      <div class="card"><div class="card-h"><h2>Mes agrégats</h2></div><div class="card-b" id="own-infos"></div></div>
+      <div class="card"><div class="card-h"><h2>Ma chronologie</h2></div><div class="card-b" id="own-chips"></div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>Détail par événement</h2></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="own-tbl">
+      <thead><tr><th>Date</th><th>Événement</th><th>Type</th><th>Mon statut</th><th>Comptabilisé</th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ BANC DE TESTS ============ -->
+  <div class="tab" id="v-bench">
+    <div class="head"><div><h1>Banc de tests du module réunions et activités</h1><p class="sub">24 scénarios avec des données fictives couvrant les 9 fonctionnalités demandées : création, périmètre, feuilles de présence, absences, excuses, historiques, corrections, statistiques et contrat du classement. Chaque calcul est confronté à un recalcul indépendant refait depuis les listes brutes — les chiffres du serveur doivent coïncider exactement.</p></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn pri" id="btn-bench-run">Lancer tous les tests</button><button class="btn ghost" id="btn-bench-export">Exporter (JSON)</button></div></div>
+    <div class="bench-summary">
+      <div class="kpi gold"><span class="lab">Scénarios exécutés</span><div class="val" id="bs-total">–</div></div>
+      <div class="kpi"><span class="lab">Conformes (✓)</span><div class="val" id="bs-pass">–</div></div>
+      <div class="kpi"><span class="lab">Écarts (✗)</span><div class="val" id="bs-fail">–</div></div>
+      <div class="kpi"><span class="lab">Durée</span><div class="val" id="bs-time">–</div></div>
+    </div>
+    <div id="bench-results"><div class="note info"><span>▶</span><span><b>Lancez la suite.</b> Données fictives uniquement ; l'environnement est réinitialisé avant et après l'exécution.</span></div></div>
+  </div>
+
+  <!-- ============ CONSOLE D'INTRUSION ============ -->
+  <div class="tab" id="v-intrusion">
+    <div class="head"><div><h1>Console d'intrusion</h1><p class="sub">Attaques hors de l'interface : saisie de présence par un membre ordinaire (A3), création par le président, correction par le trésorier (module hors de son périmètre), suppression d'événement (endpoint inexistant), correction sans motif.</p></div></div>
+    <div class="card" style="margin-bottom:16px"><div id="attacks"></div></div>
+    <div class="card"><div class="card-h"><h2>Réponses brutes du serveur</h2><button class="btn ghost sm" id="btn-console-clear">Effacer la console</button></div><div class="card-b"><div class="console" id="console-out">Console prête. Choisissez une attaque ci-dessus.</div></div></div>
+  </div>
+
+  <!-- ============ RÈGLES & PRODUCTION ============ -->
+  <div class="tab" id="v-archi">
+    <div class="head"><div><h1>Règles appliquées, choix d'implémentation et correspondance production</h1><p class="sub">Le module applique les règles validées par le bureau (A1 à A6) et la règle V11.1 (réunion du 15) ; les points non arbitrés sont implémentés comme <b>choix d'implémentation explicitement listés</b>, soumis avec le livrable — aucune règle inventée n'est présentée comme acquise.</p></div></div>
+    <div class="card"><div class="card-h"><h2>Règles appliquées telles que validées</h2></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="regles-tbl">
+      <thead><tr><th>Réf.</th><th>Règle appliquée</th><th>Implémentation dans le module</th></tr></thead>
+      <tbody id="regles-body"></tbody></table></div></div></div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>Choix d'implémentation soumis avec le livrable <span class="badge-v">réversibles, à confirmer par le bureau</span></h2></div>
+      <div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="choix-tbl">
+        <thead><tr><th>#</th><th>Point non précisé dans le dossier</th><th>Choix implémenté</th></tr></thead>
+        <tbody id="choix-body"></tbody></table></div></div></div>
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card"><div class="card-h"><h2>Du prototype à la production</h2></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="map-tbl">
+        <thead><tr><th>Mécanisme (prototype)</th><th>Implémentation de production</th><th>Verrou</th></tr></thead>
+        <tbody id="map-body"></tbody></table></div></div></div>
+      <div class="card"><div class="card-h"><h2>Limites assumées</h2><span class="tag warn">honnêteté avant tout</span></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="flaws-tbl">
+        <thead><tr><th>#</th><th>Constat</th><th>Traitement en production</th></tr></thead>
+        <tbody id="flaws-body"></tbody></table></div></div></div>
+    </div>
+  </div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+<script>
+"use strict";
+/* ==================================================================
+   SERVEUR SIMULÉ — comptes, registre membres, événements, participations,
+   journal des corrections. Règles A1 à A6 + V11.1 appliquées côté serveur.
+   Le client ne reçoit que des projections DTO.
+   ================================================================== */
+const SERVER = (() => {
+  const enc = new TextEncoder();
+  if (!window.crypto || !crypto.subtle) { alert("Navigateur sans Web Crypto : ce prototype exige un navigateur moderne."); throw new Error("no crypto"); }
+  async function sha256(str) {
+    const d = await crypto.subtle.digest("SHA-256", enc.encode(str));
+    return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  async function pbkdf2(pass, saltHex, iters = 120000) {
+    const key = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveBits"]);
+    const salt = new Uint8Array((saltHex.match(/../g) || []).map(h => parseInt(h, 16)));
+    const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: iters }, key, 256);
+    return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  const rand = n => [...crypto.getRandomValues(new Uint8Array(n))].map(b => b.toString(16).padStart(2, "0")).join("");
+
+  /* Période de démonstration : aujourd'hui fictif = 19 novembre 2026 (cohérente
+     avec le module financier v2 : la réunion du 15 novembre vient de se tenir). */
+  const AUJ = { date: "2026-11-19", mois: "2026-11", jour: 19 };
+  const now = () => Date.now();
+  const iso = () => new Date(now()).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  const SESSION_TTL = 8 * 3600 * 1000;
+  const users = [], sessions = new Map();
+  let auditSeq = 0, auditLog = [], auditTail = Promise.resolve();
+  async function _audit(action, actor, role, detail, level) {
+    const e = { seq: ++auditSeq, ts: iso(), actor: actor || "système", role: role || "—", action, detail: detail || "", level: level || "INFO", prev: auditLog.length ? auditLog[auditLog.length - 1].hash : "GENÈSE" };
+    e.hash = await sha256([e.seq, e.ts, e.actor, e.action, e.detail, e.prev].join("|"));
+    auditLog.push(e);
+    return e.seq;
+  }
+  function audit(action, actor, role, detail, level) {
+    const p = auditTail.then(() => _audit(action, actor, role, detail, level));
+    auditTail = p.then(() => undefined, () => undefined);
+    return p;
+  }
+  async function verifyAudit() {
+    let prev = "GENÈSE";
+    for (const e of auditLog) {
+      const h = await sha256([e.seq, e.ts, e.actor, e.action, e.detail, e.prev].join("|"));
+      if (e.prev !== prev) return { integre: false, seq: e.seq, motif: "chaîne rompue (lien avec l'entrée précédente)" };
+      if (h !== e.hash) return { integre: false, seq: e.seq, motif: "contenu modifié (hash recomposé différent)" };
+      prev = e.hash;
+    }
+    return { integre: true, seq: auditSeq, motif: "" };
+  }
+
+  const R = { admin: "Administrateur", president: "Président", tresorier: "Trésorier", secretaire: "Secrétaire général", bureau: "Autre membre du bureau", membre: "Membre ordinaire" };
+  /* A3 : le secrétaire général et l'administrateur créent, saisissent et corrigent ;
+     consultation ouverte à tous (events.view pour les 6 rôles). */
+  const PERMS = {
+    "auth.self":          ["admin","president","tresorier","secretaire","bureau","membre"],
+    "members.view_all":   ["admin","president","tresorier","secretaire","bureau"],
+    "events.view":        ["admin","president","tresorier","secretaire","bureau","membre"],
+    "events.create":      ["admin","secretaire"],
+    "events.presence":    ["admin","secretaire"],
+    "events.correction":  ["admin","secretaire"],
+    "events.cancel":      ["admin","secretaire"],
+    "audit.view":         ["admin","president"]
+  };
+
+  /* ── Registre des membres (reprise du module validé 6f) ── */
+  const members = [], mCounter = {};
+  const norm = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const mDTO = m => ({ id: m.id, matricule: m.matricule, nom: m.nom, prenom: m.prenom, tribu: m.tribu, statut: m.statut, date_adhesion: m.date_adhesion, date_desactivation: m.date_desactivation || null });
+  function nextMatricule(year) { mCounter[year] = (mCounter[year] || 0) + 1; return "ADLCI-" + year + "-" + String(mCounter[year]).padStart(4, "0"); }
+  const findMatricule = mat => members.find(m => m.matricule === String(mat || "").trim());
+
+  /* ── Types et statuts imposés par le cahier des charges ── */
+  const TYPES = { reunion: "Réunion ordinaire", ag: "Assemblée générale", sociale: "Activité sociale", culturelle: "Activité culturelle", developpement: "Action de développement", autre: "Autre activité associative" };
+  const STATUTS = { present: "Présent", absent: "Absent", excuse: "Absent excusé", non_concerne: "Non concerné" };
+
+  /* ── Événements, participations, journal des corrections ── */
+  const events = [], parts = [], corrections = [];
+  let evSeq = 0, pSeq = 0, cSeq = 0;
+  const evDe = id => events.find(e => e.id === Number(id));
+  function statutCounts(eid) {
+    const c = { present: 0, absent: 0, excuse: 0, non_concerne: 0, non_renseigne: 0 };
+    for (const p of parts) if (p.event_id === eid) c[p.statut === null ? "non_renseigne" : p.statut]++;
+    return c;
+  }
+  function partDe(eid, mat) { return parts.find(p => p.event_id === eid && p.matricule === mat); }
+  /* Agrégats d'un membre : seulement les événements TERMINÉS (A5) où il a une
+     participation évaluable (présent / absent / excusé) — « non concerné » exclu
+     de l'évaluation (règle du cahier des charges), taux A1 sans les excuses. */
+  function aggMembre(mat) {
+    const out = { presents: 0, absents: 0, excuses: 0, non_concernes: 0, sources: [] };
+    for (const ev of events) {
+      if (ev.statut !== "termine") continue;
+      const p = partDe(ev.id, mat);
+      if (!p) continue;
+      if (p.statut === "present") { out.presents++; out.sources.push(ev.id); }
+      else if (p.statut === "absent") { out.absents++; out.sources.push(ev.id); }
+      else if (p.statut === "excuse") { out.excuses++; out.sources.push(ev.id); }
+      else if (p.statut === "non_concerne") out.non_concernes++;
+    }
+    out.evaluables = out.presents + out.absents + out.excuses;
+    out.taux = (out.presents + out.absents) ? Math.round(out.presents / (out.presents + out.absents) * 1000) / 10 : null;
+    return out;
+  }
+  function evDTO(e) {
+    return { id: e.id, type: e.type, type_label: TYPES[e.type], titre: e.titre, date: e.date, lieu: e.lieu, statut: e.statut, notes: e.notes || null,
+      cree_par: e.cree_par, cree_le: e.cree_le, maj_le: e.maj_le || null,
+      annule_motif: e.statut === "annule" ? e.annule_motif : null, annule_par: e.statut === "annule" ? e.annule_par : null, annule_le: e.statut === "annule" ? e.annule_le : null,
+      counts: statutCounts(e.id) };
+  }
+  function pDTO(p) {
+    const m = findMatricule(p.matricule);
+    return { id: p.id, event_id: p.event_id, matricule: p.matricule, nom: m ? m.nom : "?", prenom: m ? m.prenom : "?", tribu: m ? m.tribu : "?", statut_membre: m ? m.statut : "?",
+      statut: p.statut, motif_excuse: p.motif_excuse || null, justificatif: p.justificatif || null, saisi_par: p.saisi_par || null, saisi_le: p.saisi_le || null };
+  }
+  function cDTO(c) { return { id: c.id, ts: c.ts, actor: c.actor, role: c.role, event_id: c.event_id, matricule: c.matricule, champ: c.champ, ancien: c.ancien, nouveau: c.nouveau, motif: c.motif }; }
+
+  const resp = (status, code, msg, data, auditId) => ({ status, code, msg, data: data ?? null, auditId: auditId ?? null });
+  function openSession(u) { const t = rand(32); sessions.set(t, { userId: u.id, exp: now() + SESSION_TTL }); return t; }
+  const userDTO = u => ({ id: u.id, user: u.user, nom: u.nom, role: u.role, roleLabel: R[u.role], statut: u.statut, matricule: u.matricule });
+  async function guard(req, def) {
+    if (!def) { const a = await audit("ENDPOINT_INEXISTANT", req.actorLabel || "inconnu", "—", (req.endpoint || "?") + " — requête rejetée : rien n'est jamais modifié ni supprimé hors correction historisée", "BLOCAGE"); return resp(404, "ENDPOINT_INEXISTANT", "Cette action n'existe pas sur le serveur : un événement ou une participation ne peut jamais être supprimé — toute correction est historisée.", null, a); }
+    if (def.public) return null;
+    const s = req.token && sessions.get(req.token);
+    if (!req.token || !s) { const a = await audit("SESSION_REQUISE", req.actorLabel || "anonyme", "—", req.endpoint + " sans session valide" + (req.token ? " (jeton inconnu ou révoqué)" : ""), "BLOCAGE"); return resp(401, "AUTH_REQUISE", "Vous devez être connecté pour cette action." + (req.token ? " Jeton inconnu du serveur — l'essai a été enregistré." : ""), null, a); }
+    if (s.exp <= now()) { sessions.delete(req.token); return resp(401, "SESSION_EXPIREE", "Votre session a expiré (8 heures). Reconnectez-vous.", null, await audit("SESSION_EXPIREE", "?", "—", req.endpoint, "BLOCAGE")); }
+    const u = users.find(x => x.id === s.userId);
+    if (!u || u.statut !== "actif") { sessions.delete(req.token); return resp(401, "COMPTE_DESACTIVE", "Ce compte est désactivé.", null, await audit("COMPTE_REFUSE", u ? u.user : "?", "—", req.endpoint, "BLOCAGE")); }
+    if (def.perm && !PERMS[def.perm]?.includes(u.role)) { const a = await audit("TENTATIVE_NON_AUTORISEE", u.user, R[u.role], req.endpoint + " exige « " + (def.perm || "—") + " » — rôle « " + R[u.role] + " » refusé", "ALERTE"); return resp(403, "ACCES_REFUSE", "Votre rôle (« " + R[u.role] + " ») n'autorise pas cette action : la saisie des réunions, présences et corrections est réservée au secrétaire général et à l'administrateur (A3). Le refus est journalisé.", null, a); }
+    req.user = u;
+    return null;
+  }
+
+  const TS_OK = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
+
+  /* ── Endpoints ── */
+  const EP = {};
+  EP["auth.login"] = { public: true, async h(req) {
+    const { user, pass } = req.body || {};
+    const u = users.find(x => x.user === user);
+    if (!u) return resp(401, "IDENTIFIANT_INVALIDE", "Identifiant ou mot de passe incorrect.", null, await audit("CONNEXION_ECHEC", String(user || "?"), "—", "identifiant inconnu", "ALERTE"));
+    const h = await pbkdf2(pass || "", u.salt);
+    if (h !== u.hash) return resp(401, "IDENTIFIANT_INVALIDE", "Identifiant ou mot de passe incorrect.", null, await audit("CONNEXION_ECHEC", u.user, R[u.role], "mot de passe incorrect", "ALERTE"));
+    const t = openSession(u);
+    return resp(200, "OK", "Bienvenue " + u.nom + " — session ouverte pour 8 heures.", { token: t, user: userDTO(u), perms: Object.keys(PERMS).filter(p => PERMS[p].includes(u.role)) }, await audit("CONNEXION", u.user, R[u.role], "session ouverte pour 8 h"));
+  } };
+  EP["auth.logout"] = { perm: "auth.self", async h(req) { sessions.delete(req.token); return resp(200, "OK", "Session fermée.", null, await audit("DECONNEXION", req.user.user, R[req.user.role], "session fermée")); } };
+
+  EP["members.list"] = { perm: "members.view_all", async h(req) {
+    const q = norm((req.body || {}).q);
+    let out = members.slice();
+    if (q) out = out.filter(m => norm(m.nom + " " + m.prenom).includes(q) || m.matricule.toLowerCase().includes(q));
+    out.sort((a, b) => (a.nom + a.prenom).localeCompare(b.nom + b.prenom, "fr"));
+    return resp(200, "OK", out.length + " fiche(s).", out.map(mDTO));
+  } };
+
+  const TITRE_DEFAUT = { reunion: "Réunion ordinaire", ag: "Assemblée générale", sociale: "Activité sociale", culturelle: "Activité culturelle", developpement: "Action de développement", autre: "Activité associative" };
+
+  /* Création : date et lieu obligatoires ; périmètre A2 ; liste dédoublonnée
+     (« une seule présence par membre et par événement »). */
+  EP["events.create"] = { perm: "events.create", async h(req) {
+    const b = req.body || {};
+    const type = TYPES[b.type] ? b.type : null;
+    if (!type) return resp(422, "TYPE_INCONNU", "Type d'événement inconnu : les six types imposés sont " + Object.values(TYPES).join(", ") + ".", null, await audit("CREATION_REJETEE", req.user.user, R[req.user.role], "type " + String(b.type), "ALERTE"));
+    if (!TS_OK(b.date)) return resp(422, "DATE_REQUISE", "La date de l'événement est obligatoire.", null, await audit("CREATION_REJETEE", req.user.user, R[req.user.role], "date absente", "ALERTE"));
+    const lieu = String(b.lieu || "").trim();
+    if (lieu.length < 3) return resp(422, "LIEU_REQUIS", "Le lieu de l'événement est obligatoire.", null, await audit("CREATION_REJETEE", req.user.user, R[req.user.role], "lieu absent", "ALERTE"));
+    const titre = String(b.titre || "").trim() || TITRE_DEFAUT[type] + " du " + b.date;
+    let liste = Array.isArray(b.concernes) ? b.concernes.map(x => String(x).trim()).filter(Boolean) : null;
+    if (!liste || !liste.length) {
+      if (type === "reunion" || type === "ag") liste = members.filter(m => m.statut === "actif").map(m => m.matricule); /* A2 par défaut */
+      else return resp(422, "CONCERNES_REQUIS", "Pour ce type d'événement, sélectionnez au moins un membre concerné ou invité (A2 : la pré-markation automatique ne concerne que les réunions ordinaires et les assemblées générales).", null, await audit("CREATION_REJETEE", req.user.user, R[req.user.role], "périmètre absent pour " + b.type, "ALERTE"));
+    }
+    const inconnus = [...new Set(liste)].filter(x => !findMatricule(x));
+    if (inconnus.length) return resp(422, "MATRICULE_INCONNU", "Aucune fiche ne porte le(s) matricule(s) : " + inconnus.join(", ") + " — le périmètre suit le registre des membres.", null, await audit("CREATION_REJETEE", req.user.user, R[req.user.role], "matricule inconnu " + inconnus.join(","), "ALERTE"));
+    const uniques = [...new Set(liste)]; /* une seule participation par membre et par événement */
+    const ev = { id: ++evSeq, type, titre: titre.slice(0, 120), date: String(b.date), lieu: lieu.slice(0, 120), statut: "planifie", notes: String(b.notes || "").trim().slice(0, 300) || null, cree_par: req.user.user, cree_le: iso() };
+    events.push(ev);
+    for (const mat of uniques) parts.push({ id: ++pSeq, event_id: ev.id, matricule: mat, statut: null, motif_excuse: null, justificatif: null, saisi_par: null, saisi_le: null });
+    return resp(200, "OK", "Événement n° " + ev.id + " créé (« " + ev.titre + " », " + TYPES[type] + ", " + ev.date + ", " + ev.lieu + ") : " + uniques.length + " membre(s) concerné(s)" + (uniques.length !== liste.length ? " — " + (liste.length - uniques.length) + " doublon(s) ignoré(s)" : "") + ". Statut : planifié.", { ...evDTO(ev), concernes: uniques }, await audit("EVENEMENT_CREE", req.user.user, R[req.user.role], TYPES[type] + " « " + ev.titre + " » — " + ev.date + " — " + ev.lieu + " — " + uniques.length + " concernés (A2)"));
+  } };
+
+  /* Feuille de présence : saisie atomique des statuts initiaux.
+     Règles : présence saisissable seulement le jour de l'événement ou après (pas de
+     réunion future), événement non annulé, matricule dans le périmètre (A2), excuse
+     avec motif obligatoire (A4). Modifier un statut déjà saisi = correction
+     historisée obligatoire (une seule présence par membre et par événement). */
+  EP["events.presence"] = { perm: "events.presence", async h(req) {
+    const b = req.body || {};
+    const ev = evDe(b.event_id);
+    if (!ev) return resp(404, "EVENEMENT_INCONNU", "Aucun événement ne porte ce numéro.", null, await audit("PRESENCE_REJETEE", req.user.user, R[req.user.role], "événement " + b.event_id + " inconnu", "ALERTE"));
+    if (ev.statut === "annule") return resp(422, "EVENEMENT_ANNULE", "Événement annulé (A5) : aucune présence n'est saisissable — la feuille est conservée mais hors évaluation.", null, await audit("PRESENCE_REJETEE", req.user.user, R[req.user.role], "événement n° " + ev.id + " annulé", "ALERTE"));
+    if (String(ev.date) > AUJ.date) return resp(422, "DATE_FUTURE", "L'événement est futur (" + ev.date + ") : la feuille de présence se saisit le jour de l'événement ou après.", null, await audit("PRESENCE_REJETEE", req.user.user, R[req.user.role], "événement n° " + ev.id + " futur", "ALERTE"));
+    const entries = Array.isArray(b.entries) ? b.entries : [];
+    if (!entries.length) return resp(422, "ENTRIES_REQUISES", "Aucune présence transmise : cochez au moins un statut.", null, await audit("PRESENCE_REJETEE", req.user.user, R[req.user.role], "feuille vide", "ALERTE"));
+    for (const en of entries) {
+      const p = partDe(ev.id, String(en.matricule || "").trim());
+      if (!p) return resp(422, "NON_CONCERNE", (en.matricule) + " n'était pas dans le périmètre de cet événement : un membre ne peut être évalué que pour les événements auxquels il était concerné (A2). Demandez une correction du périmètre si nécessaire.", null, await audit("PRESENCE_REJETEE", req.user.user, R[req.user.role], (en.matricule) + " hors périmètre n° " + ev.id, "ALERTE"));
+      if (!STATUTS[en.statut]) return resp(422, "STATUT_INCONNU", "Statut inconnu : les quatre statuts imposés sont présent, absent, absent excusé, non concerné.", null, await audit("PRESENCE_REJETEE", req.user.user, R[req.user.role], "statut " + String(en.statut), "ALERTE"));
+      if (en.statut === "excuse" && String(en.motif_excuse || "").trim().length < 3) return resp(422, "MOTIF_EXCUSE_REQUIS", "Absence excusée : le motif de l'excuse est obligatoire (A4) — au moins 3 caractères.", null, await audit("PRESENCE_REJETEE", req.user.user, R[req.user.role], p.matricule + " excuse sans motif (A4)", "ALERTE"));
+      if (p.statut !== null && p.statut !== en.statut) return resp(422, "CORRECTION_REQUISE", p.matricule + " a déjà une présence saisie (« " + STATUTS[p.statut] + " ») : une seule présence par membre et par événement — pour la modifier, utilisez la correction historisée (ancien → nouveau + motif).", null, await audit("PRESENCE_REJETEE", req.user.user, R[req.user.role], p.matricule + " déjà saisi sur n° " + ev.id + " — correction historisée exigée", "ALERTE"));
+    }
+    let saisis = 0, inchanges = 0;
+    for (const en of entries) {
+      const p = partDe(ev.id, String(en.matricule).trim());
+      if (p.statut === en.statut) { inchanges++; continue; }
+      p.statut = en.statut;
+      p.motif_excuse = en.statut === "excuse" ? String(en.motif_excuse || "").trim().slice(0, 160) : null;
+      p.justificatif = String(en.justificatif || "").trim().slice(0, 60) || null;
+      p.saisi_par = req.user.user; p.saisi_le = iso();
+      saisis++;
+      await audit("PRESENCE_SAISIE", req.user.user, R[req.user.role], p.matricule + " — " + STATUTS[p.statut] + " — événement n° " + ev.id + " (« " + ev.titre + " »)" + (p.motif_excuse ? " — excuse : " + p.motif_excuse : ""));
+    }
+    const c = statutCounts(ev.id);
+    return resp(200, "OK", "Feuille enregistrée : " + saisis + " présence(s) saisie(s)" + (inchanges ? ", " + inchanges + " inchangée(s)" : "") + ". État : " + c.present + " présent(s), " + c.absent + " absent(s), " + c.excuse + " excusé(s), " + c.non_renseigne + " non renseigné(s).", { saisis, inchanges, counts: c }, await audit("FEUILLE_ENREGISTREE", req.user.user, R[req.user.role], "événement n° " + ev.id + " — " + saisis + " saisies, " + inchanges + " inchangées"));
+  } };
+
+  /* Correction historisée : ancien → nouveau + auteur + horodatage + motif ≥ 10
+     caractères. Append-only : l'entrée précédente n'est jamais écrasée (A3 : sans
+     approbation présidentielle, contrairement aux corrections financières V7). */
+  EP["events.correct"] = { perm: "events.correction", async h(req) {
+    const b = req.body || {};
+    const ev = evDe(b.event_id);
+    if (!ev) return resp(404, "EVENEMENT_INCONNU", "Aucun événement ne porte ce numéro.", null, await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], "événement " + b.event_id + " inconnu", "ALERTE"));
+    if (ev.statut === "annule") return resp(422, "EVENEMENT_ANNULE", "Événement annulé (A5) : ses participations sont hors évaluation et ne se corrigent plus.", null, await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], "événement n° " + ev.id + " annulé", "ALERTE"));
+    const p = partDe(ev.id, String(b.matricule || "").trim());
+    if (!p) return resp(422, "NON_CONCERNE", String(b.matricule) + " n'était pas dans le périmètre de cet événement (A2) : rien à corriger.", null, await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], (b.matricule) + " hors périmètre n° " + ev.id, "ALERTE"));
+    const nouveau = b.nouveau_statut;
+    if (!STATUTS[nouveau] || nouveau === null) return resp(422, "STATUT_INCONNU", "Nouveau statut inconnu : présent, absent, absent excusé, non concerné.", null, await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], "statut " + String(nouveau), "ALERTE"));
+    if (p.statut === nouveau) return resp(422, "AUCUN_CHANGEMENT", "Le statut actuel de " + p.matricule + " est déjà « " + STATUTS[nouveau] + " » : aucune correction nécessaire.", null, await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], p.matricule + " n° " + ev.id + " sans changement", "ALERTE"));
+    const motif = String(b.motif || "").trim();
+    if (motif.length < 10) return resp(422, "MOTIF_REQUIS", "Correction refusée : un motif d'au moins 10 caractères est obligatoire — toute correction doit être autorisée, justifiée et traçable.", null, await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], p.matricule + " n° " + ev.id + " motif insuffisant", "ALERTE"));
+    if (nouveau === "excuse" && String(b.motif_excuse || "").trim().length < 3) return resp(422, "MOTIF_EXCUSE_REQUIS", "Nouveau statut « absent excusé » : le motif de l'excuse est obligatoire (A4).", null, await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], p.matricule + " excuse sans motif", "ALERTE"));
+    const ancien = p.statut === null ? "non renseigné" : p.statut;
+    const c = { id: ++cSeq, ts: iso(), actor: req.user.user, role: R[req.user.role], event_id: ev.id, matricule: p.matricule, champ: "statut", ancien, nouveau, motif: motif.slice(0, 200) };
+    corrections.push(c);
+    p.statut = nouveau;
+    p.motif_excuse = nouveau === "excuse" ? String(b.motif_excuse || "").trim().slice(0, 160) : null;
+    p.justificatif = nouveau === "excuse" ? (String(b.justificatif || "").trim().slice(0, 60) || p.justificatif) : null;
+    if (!p.saisi_par) { p.saisi_par = req.user.user; p.saisi_le = iso(); }
+    return resp(200, "OK", "Correction n° " + c.id + " enregistrée : " + p.matricule + " sur « " + ev.titre + " » — " + (ancien === "non renseigné" ? "non renseigné" : STATUTS[ancien]) + " → " + STATUTS[nouveau] + ". L'entrée au journal des corrections est définitive.", { ...cDTO(c), counts: statutCounts(ev.id) }, await audit("PRESENCE_CORRIGEE", req.user.user, R[req.user.role], p.matricule + " n° " + ev.id + " : " + ancien + " → " + nouveau + " — motif : " + motif.slice(0, 120)));
+  } };
+
+  /* Correction des informations d'un événement (titre, date, lieu, notes) —
+     historisée champ par champ, même exigence de motif. */
+  EP["events.correct_info"] = { perm: "events.correction", async h(req) {
+    const b = req.body || {};
+    const ev = evDe(b.event_id);
+    if (!ev) return resp(404, "EVENEMENT_INCONNU", "Aucun événement ne porte ce numéro.", null, await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], "événement " + b.event_id + " inconnu", "ALERTE"));
+    if (ev.statut === "annule") return resp(422, "EVENEMENT_ANNULE", "Événement annulé : ses informations ne se corrigent plus.", null, await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], "événement n° " + ev.id + " annulé", "ALERTE"));
+    const motif = String(b.motif || "").trim();
+    if (motif.length < 10) return resp(422, "MOTIF_REQUIS", "Correction refusée : un motif d'au moins 10 caractères est obligatoire.", null, await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], "n° " + ev.id + " motif insuffisant", "ALERTE"));
+    const changements = [];
+    for (const champ of ["titre", "date", "lieu", "notes"]) {
+      if (b[champ] === undefined) continue;
+      const val = String(b[champ]).trim().slice(0, champ === "notes" ? 300 : 120);
+      if (val === ev[champ]) continue;
+      if (champ === "date" && !TS_OK(val)) return resp(422, "DATE_INVALIDE", "Nouvelle date invalide.", null, await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], "date " + val, "ALERTE"));
+      if (champ === "lieu" && val.length < 3) return resp(422, "LIEU_REQUIS", "Nouveau lieu invalide.", null, await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], "lieu trop court", "ALERTE"));
+      corrections.push({ id: ++cSeq, ts: iso(), actor: req.user.user, role: R[req.user.role], event_id: ev.id, matricule: null, champ, ancien: String(ev[champ] ?? "—"), nouveau: val, motif: motif.slice(0, 200) });
+      ev[champ] = val; changements.push(champ);
+    }
+    if (!changements.length) return resp(422, "AUCUN_CHANGEMENT", "Aucune différence détectée : rien à corriger.", null, await audit("CORRECTION_REJETEE", req.user.user, R[req.user.role], "n° " + ev.id + " sans changement", "ALERTE"));
+    ev.maj_le = iso();
+    return resp(200, "OK", "Correction enregistrée sur « " + ev.titre + " » : " + changements.join(", ") + " — l'ancienne valeur reste au journal des corrections.", { changements }, await audit("EVENEMENT_CORRIGE", req.user.user, R[req.user.role], "n° " + ev.id + " champs " + changements.join(", ") + " — motif : " + motif.slice(0, 120)));
+  } };
+
+  /* Clôture (A5) : refusée tant que des statuts sont « non renseignés » — garantit
+     des données complètes pour le classement ; refusée pour un événement futur. */
+  EP["events.close"] = { perm: "events.presence", async h(req) {
+    const ev = evDe((req.body || {}).event_id);
+    if (!ev) return resp(404, "EVENEMENT_INCONNU", "Aucun événement ne porte ce numéro.");
+    if (ev.statut === "annule") return resp(422, "EVENEMENT_ANNULE", "Événement annulé : il ne peut pas être clôturé (A5).");
+    if (ev.statut === "termine") return resp(409, "DEJA_CLOTUREE", "Cet événement est déjà clôturé.");
+    if (String(ev.date) > AUJ.date) return resp(422, "DATE_FUTURE", "L'événement est futur (" + ev.date + ") : on ne clôture pas une réunion qui n'a pas encore eu lieu.");
+    const nr = statutCounts(ev.id).non_renseigne;
+    if (nr > 0) return resp(422, "LISTE_INCOMPLETE", "Clôture refusée : " + nr + " statut(s) non renseigné(s) sur la feuille. Chaque membre concerné doit porter un des quatre statuts — sinon les statistiques et le classement seraient biaisés.", null, await audit("CLOTURE_REJETEE", req.user.user, R[req.user.role], "n° " + ev.id + " — " + nr + " non renseigné(s)", "ALERTE"));
+    ev.statut = "termine"; ev.maj_le = iso(); ev.cloture_par = req.user.user; ev.cloture_le = iso();
+    const c = statutCounts(ev.id);
+    return resp(200, "OK", "Événement n° " + ev.id + " clôturé : " + c.present + " présent(s), " + c.absent + " absent(s), " + c.excuse + " excusé(s), " + c.non_concerne + " non concerné(s). Il entre désormais dans les statistiques et l'évaluation.", { ...evDTO(ev) }, await audit("EVENEMENT_CLOTURE", req.user.user, R[req.user.role], "n° " + ev.id + " (« " + ev.titre + " ») — " + c.present + "P / " + c.absent + "A / " + c.excuse + "E / " + c.non_concerne + "NC"));
+  } };
+
+  /* Annulation (A5) : tracée, motif obligatoire ; l'événement et ses participations
+     sont conservés mais exclus des statistiques et de l'évaluation. */
+  EP["events.cancel"] = { perm: "events.cancel", async h(req) {
+    const b = req.body || {};
+    const ev = evDe(b.event_id);
+    if (!ev) return resp(404, "EVENEMENT_INCONNU", "Aucun événement ne porte ce numéro.", null, await audit("ANNULATION_REJETEE", req.user.user, R[req.user.role], "événement " + b.event_id + " inconnu", "ALERTE"));
+    if (ev.statut === "annule") return resp(409, "DEJA_ANNULEE", "Cet événement est déjà annulé.");
+    const motif = String(b.motif || "").trim();
+    if (motif.length < 10) return resp(422, "MOTIF_REQUIS", "Annulation refusée : un motif d'au moins 10 caractères est obligatoire (A5 : l'annulation est tracée).", null, await audit("ANNULATION_REJETEE", req.user.user, R[req.user.role], "n° " + ev.id + " motif insuffisant", "ALERTE"));
+    ev.statut = "annule"; ev.annule_motif = motif.slice(0, 200); ev.annule_par = req.user.user; ev.annule_le = iso();
+    return resp(200, "OK", "Événement n° " + ev.id + " annulé : « " + ev.titre + " ». Il et ses participations restent enregistrés (aucune suppression) mais sont exclus des statistiques et de l'évaluation (A5).", { ...evDTO(ev) }, await audit("EVENEMENT_ANNULE", req.user.user, R[req.user.role], "n° " + ev.id + " (« " + ev.titre + " ») — motif : " + motif.slice(0, 120)));
+  } };
+
+  EP["events.list"] = { perm: "events.view", async h(req) {
+    const b = req.body || {};
+    let out = events.slice();
+    if (b.type) out = out.filter(e => e.type === b.type);
+    if (b.statut) out = out.filter(e => e.statut === b.statut);
+    if (b.q) { const q = norm(b.q); out = out.filter(e => norm(e.titre).includes(q) || norm(e.lieu).includes(q)); }
+    out.sort((a, b2) => b2.date.localeCompare(a.date) || b2.id - a.id);
+    return resp(200, "OK", out.length + " événement(s).", out.map(evDTO));
+  } };
+
+  EP["events.detail"] = { perm: "events.view", async h(req) {
+    const ev = evDe((req.body || {}).event_id);
+    if (!ev) return resp(404, "EVENEMENT_INCONNU", "Aucun événement ne porte ce numéro.");
+    const ps = parts.filter(p => p.event_id === ev.id).map(pDTO);
+    const cors = corrections.filter(c => c.event_id === ev.id).map(cDTO);
+    return resp(200, "OK", "Événement n° " + ev.id + " — " + ps.length + " participation(s) au périmètre.", { event: evDTO(ev), participations: ps, corrections: cors });
+  } };
+
+  /* Registre des absences : événements terminés uniquement (A5 : un annulé ne
+     produit aucune absence) ; l'excusé porte son motif (A4) et son justificatif. */
+  EP["events.absences"] = { perm: "events.view", async h(req) {
+    const b = req.body || {};
+    let rows = [];
+    for (const ev of events) {
+      if (ev.statut !== "termine") continue;
+      for (const p of parts.filter(x => x.event_id === ev.id && (x.statut === "absent" || x.statut === "excuse"))) {
+        rows.push({ event_id: ev.id, titre: ev.titre, date: ev.date, type: ev.type, type_label: TYPES[ev.type], lieu: ev.lieu, ...pDTO(p) });
+      }
+    }
+    if (b.matricule) rows = rows.filter(r => r.matricule === String(b.matricule).trim());
+    if (b.justifiee === "excuse") rows = rows.filter(r => r.statut === "excuse");
+    if (b.justifiee === "absent") rows = rows.filter(r => r.statut === "absent");
+    rows.sort((a, b2) => b2.date.localeCompare(a.date) || a.nom.localeCompare(b2.nom, "fr"));
+    return resp(200, "OK", rows.length + " absence(s) enregistrée(s) sur les événements terminés.", rows);
+  } };
+
+  /* Historique d'un membre : chronologie complète + agrégats serveur (A1/A2/A5) */
+  EP["member.history"] = { perm: "events.view", async h(req) {
+    const m = findMatricule((req.body || {}).matricule);
+    if (!m) return resp(404, "MATRICULE_INCONNU", "Aucune fiche ne porte ce matricule.");
+    const rows = [];
+    for (const p of parts.filter(x => x.matricule === m.matricule)) {
+      const ev = evDe(p.event_id);
+      let compte = false, raison = "";
+      if (ev.statut === "annule") raison = "événement annulé (A5)";
+      else if (ev.statut === "planifie") raison = "événement planifié — feuille non tenue ou non clôturée";
+      else if (p.statut === null) raison = "statut non renseigné";
+      else if (p.statut === "non_concerne") raison = "non concerné — exclu de l'évaluation (A2)";
+      else { compte = true; raison = "comptabilisé (A1)"; }
+      rows.push({ event_id: ev.id, titre: ev.titre, date: ev.date, type: ev.type, type_label: TYPES[ev.type], lieu: ev.lieu, event_statut: ev.statut, statut: p.statut, motif_excuse: p.motif_excuse || null, justificatif: p.justificatif || null, saisi_par: p.saisi_par || null, saisi_le: p.saisi_le || null, compte, raison });
+    }
+    rows.sort((a, b2) => a.date.localeCompare(b2.date) || a.event_id - b2.event_id);
+    const agg = aggMembre(m.matricule);
+    return resp(200, "OK", "Historique de " + m.matricule + " : " + agg.presents + " présent(s), " + agg.absents + " absent(s), " + agg.excuses + " excusé(s) sur " + agg.evaluables + " évaluable(s)." + (agg.taux !== null ? " Taux de présence : " + agg.taux + " %." : ""), { matricule: m.matricule, nom: m.nom, prenom: m.prenom, tribu: m.tribu, statut_membre: m.statut, date_adhesion: m.date_adhesion, date_desactivation: m.date_desactivation || null, agg, rows });
+  } };
+
+  /* Journal brut (équivalent du journal financier) : liste complète des événements,
+     participations et corrections pour recalcul indépendant et export. */
+  EP["events.export"] = { perm: "events.view", async h(req) {
+    return resp(200, "OK", "Journal brut : " + events.length + " événement(s), " + parts.length + " participation(s), " + corrections.length + " correction(s).", { auj: AUJ, events: events.map(evDTO), participations: parts.map(pDTO), corrections: corrections.map(cDTO) });
+  } };
+
+  /* Statistiques globales : par membre, par type, par mois — terminés uniquement */
+  EP["stats.global"] = { perm: "events.view", async h(req) {
+    const perMember = members.map(m => { const a = aggMembre(m.matricule); return { matricule: m.matricule, nom: m.nom, prenom: m.prenom, tribu: m.tribu, statut_membre: m.statut, evaluables: a.evaluables, presents: a.presents, absents: a.absents, absents_excuses: a.excuses, non_concernes: a.non_concernes, taux_presence: a.taux }; });
+    const perType = {}, perMois = {};
+    let tot = { eventsTermine: 0, evalues: 0, presents: 0, absents: 0, excuses: 0, nonConcernes: 0 };
+    for (const ev of events) {
+      if (ev.statut !== "termine") continue;
+      tot.eventsTermine++;
+      const c = statutCounts(ev.id);
+      const t = perType[ev.type] = perType[ev.type] || { type: ev.type, label: TYPES[ev.type], events: 0, evalues: 0, presents: 0, absents: 0, excuses: 0, taux: null };
+      const mo = perMois[ev.date.slice(0, 7)] = perMois[ev.date.slice(0, 7)] || { mois: ev.date.slice(0, 7), events: 0, evalues: 0, presents: 0, absents: 0, excuses: 0, taux: null };
+      for (const g of [t, mo]) {
+        g.events++; g.presents += c.present; g.absents += c.absent; g.excuses += c.excuse;
+        g.evalues = g.presents + g.absents + g.excuses;
+        g.taux = (g.presents + g.absents) ? Math.round(g.presents / (g.presents + g.absents) * 1000) / 10 : null;
+      }
+      tot.evalues += c.present + c.absent + c.excuse;
+      tot.presents += c.present; tot.absents += c.absent; tot.excuses += c.excuse; tot.nonConcernes += c.non_concerne;
+    }
+    tot.taux = (tot.presents + tot.absents) ? Math.round(tot.presents / (tot.presents + tot.absents) * 1000) / 10 : null;
+    const moisList = Object.values(perMois).sort((a, b) => a.mois.localeCompare(b.mois));
+    return resp(200, "OK", tot.eventsTermine + " événement(s) terminé(s) — " + tot.evalues + " participations évaluables, taux global " + (tot.taux === null ? "n/a" : tot.taux + " %") + " (A1).", { perMember, perType: Object.values(perType), perMois: moisList, tot });
+  } };
+
+  /* Contrat de données du futur classement (pièce suivante du dossier) :
+     projection stable, formule documentée, périmètre explicite par membre. */
+  const FORMULE = "Taux de présence = présents ÷ (présents + absents) sur les événements TERMINÉS où le membre était concerné et évaluable. Les absences excusées sont exclues du numérateur et du dénominateur (A1 : elles ne pénalisent pas). Le statut « non concerné » est exclu de l'évaluation (A2). Les événements annulés et planifiés sont exclus (A5). Toute correction de statut est historisée dans le journal des corrections. taux_presence vaut null si aucun événement évaluable.";
+  EP["stats.ranking"] = { perm: "events.view", async h(req) {
+    const membres = members.map(m => { const a = aggMembre(m.matricule); return { matricule: m.matricule, nom: m.nom, prenom: m.prenom, tribu: m.tribu, statut_membre: m.statut, evenements_evalues: a.evaluables, presents: a.presents, absents: a.absents, absents_excuses: a.excuses, non_concernes: a.non_concernes, taux_presence: a.taux, sources: a.sources.slice().sort((x, y) => x - y) }; });
+    return resp(200, "OK", "Contrat classement : " + membres.length + " membre(s) projeté(s) — formule A1 documentée, périmètre explicite.", { genere_le: iso(), auj: AUJ, formule: FORMULE, membres });
+  } };
+
+  EP["audit.list"] = { perm: "audit.view", async h(req) { return resp(200, "OK", auditLog.length + " entrées.", auditLog.map(e => ({ ...e }))); } };
+  EP["audit.verify"] = { perm: "audit.view", async h(req) { const v = await verifyAudit(); return resp(200, "OK", v.integre ? "Chaîne intègre : aucune altération détectée sur " + v.seq + " entrées." : "ALERTE : chaîne compromise à l'entrée n° " + v.seq + " — " + v.motif, { ...v }); } };
+  EP["audit.tamper_demo"] = { perm: "audit.view", async h(req) { if (auditLog.length > 1) { const k = auditLog[Math.min(2, auditLog.length - 1)]; k.detail = k.detail + " [MODIFIÉ PAR UN ATTAQUANT]"; } return resp(200, "OK", "Simulation : une entrée ancienne a été altérée. Relancez la vérification d'intégrité."); } };
+
+  async function api(req) {
+    req.endpoint = req.endpoint || "?";
+    try {
+      const def = EP[req.endpoint];
+      const g = await guard(req, def);
+      if (g) return g;
+      return await def.h(req);
+    } catch (err) {
+      return resp(500, "ERREUR_SERVEUR", "Une erreur interne est survenue — l'action n'a pas été effectuée et a été journalisée.", null, await audit("ERREUR_INTERNE", "système", "—", req.endpoint + " : " + (err && err.message || "?"), "ALERTE"));
+    }
+  }
+
+  /* ── Amorçage : comptes, fiches, événements et feuilles fictifs ── */
+  async function seed() {
+    const defs = [
+      ["s.diallo", "Admin-2026!CI", "admin", "Salif Diallo", "ADLCI-2026-0003"],
+      ["m.kante", "President-2026!", "president", "Mariam Kanté", "ADLCI-2026-0002"],
+      ["a.traore", "Tresor-2026!CI", "tresorier", "Awa Traoré", null],
+      ["f.cisse", "Secretariat-2026!", "secretaire", "Fatoumata Cissé", "ADLCI-2025-0004"],
+      ["n.aka", "Bureau-2026!CI", "bureau", "Nantenin Aka", "ADLCI-2025-0006"],
+      ["k.yao", "Membre-2026!CI", "membre", "Kouassi Yao", "ADLCI-2025-0001"]
+    ];
+    users.length = 0;
+    for (const [user, pass, role, nom, matricule] of defs) {
+      const salt = rand(16);
+      users.push({ id: users.length + 1, user, nom, role, statut: "actif", salt, hash: await pbkdf2(pass, salt), derniere: "—", matricule });
+    }
+    sessions.clear();
+    await auditTail; auditSeq = 0; auditLog = []; auditTail = Promise.resolve();
+    members.length = 0; events.length = 0; parts.length = 0; corrections.length = 0;
+    for (const k of Object.keys(mCounter)) delete mCounter[k];
+    evSeq = 0; pSeq = 0; cSeq = 0;
+    const seedM = [
+      ["Kouassi", "Yao", "Douayêro", "2025-03-08", "actif", null],
+      ["Ibrahima", "Sanogo", "Mariabêh", "2025-03-08", "actif", null],
+      ["Aminata", "Bamba", "Abouyabêh", "2025-04-12", "actif", null],
+      ["Fatoumata", "Cissé", "Aliyabêh", "2025-04-12", "actif", null],
+      ["Adama", "Ouédraogo", "Simbayabêh", "2025-05-03", "inactif", "2026-08-15"],
+      ["Nantenin", "Aka", "Djigayabêh", "2025-05-03", "actif", null],
+      ["Moussa", "Koné", "Douayêro", "2026-02-14", "actif", null],
+      ["Mariam", "Kanté", "Mariabêh", "2026-02-14", "actif", null],
+      ["Salif", "Diallo", "Abouyabêh", "2026-03-21", "actif", null]
+    ];
+    for (const [prenom, nom, tribu, date, statut, desact] of seedM) {
+      members.push({ id: members.length + 1, matricule: nextMatricule(date.slice(0, 4)), nom, prenom, tribu, date_adhesion: date, statut, date_desactivation: desact });
+    }
+    const [KOU, SAN, AMI, FAT, ADA, NAN, MOU, MAR, SAL] = members.map(m => m.matricule);
+    /* Événements fictifs : feuilles complètes et cohérentes avec les règles A1 à A6.
+       ADA (désactivé le 2026-08-15) n'est pas pré-marqué après cette date (A2) ;
+       AMI est marqué non concerné sur l'action de développement (périmètre ajusté). */
+    function mkEv(type, titre, date, lieu, notes, concernes) {
+      const ev = { id: ++evSeq, type, titre, date, lieu, statut: "planifie", notes: notes || null, cree_par: "f.cisse", cree_le: iso() };
+      events.push(ev);
+      for (const [mat, st, motif, just] of concernes) parts.push({ id: ++pSeq, event_id: ev.id, matricule: mat, statut: st, motif_excuse: motif || null, justificatif: just || null, saisi_par: st ? "f.cisse" : null, saisi_le: st ? iso() : null });
+      return ev.id;
+    }
+    const P = "present", A = "absent", E = "excuse", NC = "non_concerne";
+    mkEv("reunion", "Réunion ordinaire de septembre", "2026-09-15", "Siège ADL-CI, Cocody", "Ordre du jour : bilan de l'année, palabres de fin d'année.", [[KOU, P], [SAN, A], [AMI, E, "Déplacement professionnel à Abidjan — convocation de l'employeur", "EMP-2026-09-31"], [FAT, P], [NAN, P], [MOU, P], [MAR, P], [SAL, P]]).valueOf();
+    events[events.length - 1].statut = "termine";
+    mkEv("reunion", "Réunion ordinaire d'octobre", "2026-10-15", "Siège ADL-CI, Cocody", "Ordre du jour : recouvrements, préparation de la soirée culturelle.", [[KOU, P], [SAN, A], [AMI, P], [FAT, P], [NAN, P], [MOU, P], [MAR, P], [SAL, A]]);
+    events[events.length - 1].statut = "termine";
+    mkEv("reunion", "Réunion ordinaire de novembre", "2026-11-15", "Siège ADL-CI, Cocody", "Séance de règlement des cotisations (V11.1) et préparation des palabres.", [[KOU, P], [SAN, P], [AMI, P], [FAT, P], [NAN, E, "Maladie — certificat médical transmis au secrétariat", "CM-2026-11-08"], [MOU, P], [MAR, P], [SAL, P]]);
+    events[events.length - 1].statut = "termine";
+    mkEv("ag", "Assemblée générale ordinaire", "2026-07-05", "Salle des fêtes d'Angré", "Rapport moral, rapport financier, budget prévisionnel.", [[KOU, P], [SAN, P], [AMI, P], [FAT, A], [ADA, P], [NAN, P], [MOU, P], [MAR, P], [SAL, P]]);
+    events[events.length - 1].statut = "termine";
+    mkEv("sociale", "Journée de salubrité du quartier", "2026-08-22", "Quartier Abouyabêh", "Action conjointe avec les chefs de quartier.", [[KOU, P], [SAN, P], [AMI, A], [NAN, P], [MOU, P], [SAL, P]]);
+    events[events.length - 1].statut = "termine";
+    mkEv("culturelle", "Soirée culturelle de fin d'année", "2026-10-31", "Maison des jeunes de Cocody", "Reportée avant tenue — aucune feuille saisie.", [[KOU, null], [SAN, null], [AMI, null], [FAT, null], [NAN, null], [MOU, null], [MAR, null], [SAL, null]]);
+    events[events.length - 1].statut = "annule"; events[events.length - 1].annule_motif = "Report décidé par le bureau le 2026-10-20 — conflit de calendrier avec la reco du village"; events[events.length - 1].annule_par = "f.cisse"; events[events.length - 1].annule_le = iso();
+    mkEv("developpement", "Défrichage du champ collectif", "2026-11-08", "Champ collectif de Laabha", "Action de développement — périmètre ajusté : AMI en déplacement scolaire.", [[KOU, P], [SAN, P], [AMI, A], [FAT, P], [NAN, P], [MOU, A], [MAR, P], [SAL, P]]);
+    events[events.length - 1].statut = "termine";
+    corrections.push({ id: ++cSeq, ts: iso(), actor: "f.cisse", role: R.secretaire, event_id: events[events.length - 1].id, matricule: AMI, champ: "statut", ancien: "absent", nouveau: "non_concerne", motif: "Constat du bureau : AMI était en déplacement scolaire — hors périmètre de l'action (A2)" });
+    parts.find(p => p.event_id === events[events.length - 1].id && p.matricule === AMI).statut = NC;
+    mkEv("reunion", "Réunion ordinaire de décembre", "2026-12-15", "Siège ADL-CI, Cocody", "Prévue : bilan de fin d'année et vote du budget.", [[KOU, null], [SAN, null], [AMI, null], [FAT, null], [NAN, null], [MOU, null], [MAR, null], [SAL, null]]);
+    await audit("SYSTEME_AMORCE", "système", "—", "Registre initialisé : " + members.length + " membres fictifs (module 6f) dont 1 désactivé le 2026-08-15 ; " + events.length + " événements (6 types couverts : 3 réunions du 15, 1 AG, 1 sociale, 1 culturelle annulée, 1 développement, 1 planifiée) ; " + corrections.length + " correction historisée de démonstration (non concerné, A2).");
+  }
+
+  return { api, seed, R, PERMS, TYPES, STATUTS, AUJ, stats: () => ({ users: users.length, members: members.length, events: events.length, parts: parts.length, corrections: corrections.length, audit: auditSeq }) };
+})();
+/* ==================================================================
+   BANC DE TESTS — 24 scénarios avec données fictives. Les calculs du
+   serveur sont confrontés à un RECALCUL INDÉPENDANT refait depuis les
+   listes brutes exposées (events.export) — aucune confiance aveugle.
+   ================================================================== */
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const STATUT_LBL = { present: "Présent", absent: "Absent", excuse: "Absent excusé", non_concerne: "Non concerné" };
+let BENCH_RESULTS = null;
+async function login(u, p) { return await SERVER.api({ endpoint: "auth.login", body: { user: u, pass: p } }); }
+async function call(endpoint, token, body) { return await SERVER.api({ endpoint, token, body }); }
+const TSG = "Tresor-2026!CI";
+const CREDS = { admin: ["s.diallo", "Admin-2026!CI"], president: ["m.kante", "President-2026!"], tresorier: ["a.traore", TSG], secretaire: ["f.cisse", "Secretariat-2026!"], bureau: ["n.aka", "Bureau-2026!CI"], membre: ["k.yao", "Membre-2026!CI"] };
+
+/* Recalcul indépendant : rejoue les règles A1/A2/A5 depuis le journal brut */
+async function recalc(t) {
+  const ex = (await call("events.export", t, {})).data;
+  const evDe = id => ex.events.find(e => e.id === id);
+  const perMember = {};
+  const tot = { eventsTermine: 0, evalues: 0, presents: 0, absents: 0, excuses: 0, nonConcernes: 0, taux: null };
+  for (const ev of ex.events) if (ev.statut === "termine") {
+    tot.eventsTermine++;
+    for (const p of ex.participations.filter(x => x.event_id === ev.id)) {
+      if (p.statut === "present") { tot.presents++; add(p.matricule, ev.id, "presents"); }
+      else if (p.statut === "absent") { tot.absents++; add(p.matricule, ev.id, "absents"); }
+      else if (p.statut === "excuse") { tot.excuses++; add(p.matricule, ev.id, "excuses"); }
+      else if (p.statut === "non_concerne") tot.nonConcernes++;
+    }
+  }
+  function add(mat, src, k) {
+    const o = perMember[mat] = perMember[mat] || { presents: 0, absents: 0, excuses: 0, sources: [], taux: null };
+    o[k]++; o.sources.push(src);
+    o.taux = (o.presents + o.absents) ? Math.round(o.presents / (o.presents + o.absents) * 1000) / 10 : null;
+  }
+  tot.evalues = tot.presents + tot.absents + tot.excuses;
+  tot.taux = (tot.presents + tot.absents) ? Math.round(tot.presents / (tot.presents + tot.absents) * 1000) / 10 : null;
+  const absRows = [];
+  for (const ev of ex.events.filter(e => e.statut === "termine")) for (const p of ex.participations.filter(x => x.event_id === ev.id && (x.statut === "absent" || x.statut === "excuse"))) absRows.push(p);
+  return { ex, evDe, perMember, tot, absRows };
+}
+
+const BENCH = [
+  /* ── G1 · Création : types, date, lieu, périmètre (A2, A6) ── */
+  { id: "T1", g: 1, titre: "Créer une réunion ordinaire : actifs pré-marqués par défaut (A2), statut planifié", attendu: "réunion du 15 janvier 2027 → 200 ; 8 concernés (tous les actifs, ADA désactivé exclu) ; statut planifie",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const ADA = "ADLCI-2025-0005"; const r = await call("events.create", t, { type: "reunion", titre: "Réunion ordinaire de janvier 2027", date: "2027-01-15", lieu: "Siège ADL-CI, Cocody" }); return { obtenu: r.status + " — " + r.data.concernes.length + " concernés ; ADA exclu : " + !r.data.concernes.includes(ADA) + " ; statut : " + r.data.statut, pass: r.status === 200 && r.data.concernes.length === 8 && !r.data.concernes.includes(ADA) && r.data.statut === "planifie", detail: "A2 : pour une réunion ordinaire ou une AG, tous les actifs sont pré-marqués — ajustable avant confirmation." } } },
+  { id: "T2", g: 1, titre: "Créer une activité : sélection manuelle du périmètre", attendu: "activité sociale du 25/11 → 200 ; 4 concernés choisis à la main ; les autres membres hors périmètre",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const SAL = "ADLCI-2026-0003"; const r = await call("events.create", t, { type: "sociale", titre: "Cours d'alphabétisation — séance inaugurale", date: "2026-11-25", lieu: "Cour communautaire", concernes: ["ADLCI-2025-0001", "ADLCI-2025-0002", "ADLCI-2025-0003", "ADLCI-2025-0004"] }); return { obtenu: r.status + " — " + r.data.concernes.length + " concernés ; SAL hors périmètre : " + !r.data.concernes.includes(SAL), pass: r.status === 200 && r.data.concernes.length === 4 && !r.data.concernes.includes(SAL), detail: "A2 : les 4 autres types exigent une sélection manuelle — personne n'est évalué sans avoir été déclaré concerné." } } },
+  { id: "T3", g: 1, titre: "Créations invalides refusées : date, lieu, type, matricule inconnu, périmètre vide", attendu: "sans lieu → 422 LIEU_REQUIS ; sans date → 422 DATE_REQUISE ; type inconnu → 422 ; matricule inconnu → 422 ; activité sans concernés → 422",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const r1 = await call("events.create", t, { type: "reunion", date: "2026-12-20" }); const r2 = await call("events.create", t, { type: "reunion", lieu: "Siège" }); const r3 = await call("events.create", t, { type: "gala", date: "2026-12-20", lieu: "Siège" }); const r4 = await call("events.create", t, { type: "sociale", date: "2026-12-20", lieu: "Siège", concernes: ["ADLCI-2025-0001", "ADLCI-2099-0001"] }); const r5 = await call("events.create", t, { type: "culturelle", date: "2026-12-20", lieu: "Siège" }); return { obtenu: [r1, r2, r3, r4, r5].map(x => x.status + " " + x.code).join(" ; "), pass: r1.status === 422 && r1.code === "LIEU_REQUIS" && r2.status === 422 && r2.code === "DATE_REQUISE" && r3.status === 422 && r4.status === 422 && r4.code === "MATRICULE_INCONNU" && r5.status === 422 && r5.code === "CONCERNES_REQUIS", detail: "La date et le lieu sont obligatoires (fonctionnalité 3) ; les 6 types sont imposés ; le périmètre suit le registre des membres." } } },
+  { id: "T4", g: 1, titre: "Une seule participation par membre et par événement : doublons dédoublonnés", attendu: "liste [KOU, KOU, SAN] → 200 ; 2 concernés après dédoublonnage ; l'invariant (événement, membre) tient sur tout le journal",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const r = await call("events.create", t, { type: "autre", titre: "Séance de coordination budget", date: "2026-11-30", lieu: "Siège ADL-CI, Cocody", concernes: ["ADLCI-2025-0001", "ADLCI-2025-0001", "ADLCI-2025-0002"] }); const ex = (await call("events.export", t, {})).data; const paires = ex.participations.map(p => p.event_id + "/" + p.matricule); const doublons = paires.length !== new Set(paires).size; return { obtenu: r.status + " — " + r.data.concernes.length + " concernés (doublon ignoré : " + /doublon/.test(r.msg) + ") ; paires uniques sur " + ex.participations.length + " participations : " + !doublons, pass: r.status === 200 && r.data.concernes.length === 2 && !doublons, detail: "Règle imposée : une seule présence par membre et par événement — l'invariant est vérifié sur le journal entier après dédoublonnage." } } },
+
+  /* ── G2 · Feuilles de présence : 4 statuts, unicité, clôture (A4, A5) ── */
+  { id: "T5", g: 2, titre: "Saisir les présences : 4 statuts disponibles, saisie atomique", attendu: "événement du 12/11 créé (4 concernés) ; KOU présent + SAN absent → 200 ; 2 non renseignés restants",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const r = await call("events.create", t, { type: "autre", titre: "Réunion de chantier du comité d'organisation", date: "2026-11-12", lieu: "Siège ADL-CI, Cocody", concernes: ["ADLCI-2025-0001", "ADLCI-2025-0002", "ADLCI-2025-0003", "ADLCI-2025-0004"] }); const eid = r.data.id; const f = await call("events.presence", t, { event_id: eid, entries: [{ matricule: "ADLCI-2025-0001", statut: "present" }, { matricule: "ADLCI-2025-0002", statut: "absent" }] }); const d = (await call("events.detail", t, { event_id: eid })).data; return { obtenu: "création " + r.status + " ; feuille " + f.status + " (" + f.data.saisis + " saisies) ; état : " + d.event.counts.present + "P / " + d.event.counts.absent + "A / " + d.event.counts.non_renseigne + " non renseignés", pass: r.status === 200 && f.status === 200 && f.data.saisis === 2 && d.event.counts.present === 1 && d.event.counts.absent === 1 && d.event.counts.non_renseigne === 2, detail: "Les quatre statuts imposés sont acceptés à la saisie ; la feuille peut être complétée en plusieurs passages." } } },
+  { id: "T6", g: 2, titre: "Unicité de la présence : ré-saisie identique sans effet, changement refusé, hors périmètre refusé", attendu: "même statut re-soumis → 200 (0 saisie, 1 inchangée) ; statut différent → 422 CORRECTION_REQUISE ; SAL hors périmètre → 422 NON_CONCERNE",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const ex = (await call("events.export", t, {})).data; const eid = ex.events.find(e => e.titre.startsWith("Réunion de chantier")).id; const r1 = await call("events.presence", t, { event_id: eid, entries: [{ matricule: "ADLCI-2025-0001", statut: "present" }] }); const r2 = await call("events.presence", t, { event_id: eid, entries: [{ matricule: "ADLCI-2025-0001", statut: "absent" }] }); const r3 = await call("events.presence", t, { event_id: eid, entries: [{ matricule: "ADLCI-2026-0003", statut: "present" }] }); return { obtenu: "identique " + r1.status + " (saisies " + r1.data.saisis + ", inchangées " + r1.data.inchanges + ") ; différent " + r2.status + " (" + r2.code + ") ; hors périmètre " + r3.status + " (" + r3.code + ")", pass: r1.status === 200 && r1.data.saisis === 0 && r1.data.inchanges === 1 && r2.status === 422 && r2.code === "CORRECTION_REQUISE" && r3.status === 422 && r3.code === "NON_CONCERNE", detail: "Une seule présence par membre et par événement : le changement passe exclusivement par la correction historisée ; un membre non concerné ne peut pas être évalué (A2)." } } },
+  { id: "T7", g: 2, titre: "Absence excusée : motif obligatoire, justificatif facultatif (A4)", attendu: "sans motif → 422 MOTIF_EXCUSE_REQUIS ; avec motif → 200, motif et justificatif enregistrés",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const ex = (await call("events.export", t, {})).data; const eid = ex.events.find(e => e.titre.startsWith("Réunion de chantier")).id; const r1 = await call("events.presence", t, { event_id: eid, entries: [{ matricule: "ADLCI-2025-0003", statut: "excuse" }] }); const r2 = await call("events.presence", t, { event_id: eid, entries: [{ matricule: "ADLCI-2025-0003", statut: "excuse", motif_excuse: "Convocation bancaire obligatoire à Abidjan", justificatif: "CONV-2026-11-12" }] }); const p = (await call("events.detail", t, { event_id: eid })).data.participations.find(x => x.matricule === "ADLCI-2025-0003"); return { obtenu: "sans motif " + r1.status + " (" + r1.code + ") ; avec motif " + r2.status + " ; motif : « " + (p.motif_excuse || "—") + " », justificatif : " + p.justificatif, pass: r1.status === 422 && r1.code === "MOTIF_EXCUSE_REQUIS" && r2.status === 200 && p.motif_excuse === "Convocation bancaire obligatoire à Abidjan" && p.justificatif === "CONV-2026-11-12", detail: "A4 : le statut « absent excusé » exige un motif — la pièce justificative reste facultative et tracée." } } },
+  { id: "T8", g: 2, titre: "Clôture : refusée tant que la feuille est incomplète, refusée pour un événement futur (choix + A5)", attendu: "clôture avec un statut non renseigné → 422 LISTE_INCOMPLETE ; après saisie du dernier statut → 200 terminé ; clôture d'un événement futur → 422",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const ex = (await call("events.export", t, {})).data; const ev = ex.events.find(e => e.titre.startsWith("Réunion de chantier")); const r1 = await call("events.close", t, { event_id: ev.id }); const f = await call("events.presence", t, { event_id: ev.id, entries: [{ matricule: "ADLCI-2025-0004", statut: "non_concerne" }] }); const r2 = await call("events.close", t, { event_id: ev.id }); const futur = ex.events.find(e => e.date === "2027-01-15"); const r3 = await call("events.close", t, { event_id: futur.id }); return { obtenu: "incomplète " + r1.status + " (" + r1.code + " : " + r1.msg.slice(0, 60) + "…) ; dernier statut " + f.status + " ; clôture " + r2.status + " → " + (r2.data ? r2.data.statut : "?") + " ; futur " + r3.status + " (" + r3.code + ")", pass: r1.status === 422 && r1.code === "LISTE_INCOMPLETE" && f.status === 200 && r2.status === 200 && r2.data.statut === "termine" && r3.status === 422 && r3.code === "DATE_FUTURE", detail: "Choix d'implémentation soumis : la clôture bloque tant que chaque membre concerné n'a pas un des 4 statuts — sinon les statistiques seraient biaisées. A5 : pas de clôture d'une réunion future." } } },
+  { id: "T9", g: 2, titre: "Gardes-fous de la feuille : événement futur, annulé, inconnu", attendu: "présence sur événement futur → 422 DATE_FUTURE ; sur événement annulé → 422 EVENEMENT_ANNULE ; événement inconnu → 404",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const ex = (await call("events.export", t, {})).data; const futur = ex.events.find(e => e.date === "2027-01-15"); const annule = ex.events.find(e => e.statut === "annule" && e.type === "culturelle"); const r1 = await call("events.presence", t, { event_id: futur.id, entries: [{ matricule: "ADLCI-2025-0001", statut: "present" }] }); const r2 = await call("events.presence", t, { event_id: annule.id, entries: [{ matricule: "ADLCI-2025-0001", statut: "present" }] }); const r3 = await call("events.presence", t, { event_id: 999, entries: [{ matricule: "ADLCI-2025-0001", statut: "present" }] }); return { obtenu: "futur " + r1.status + " (" + r1.code + ") ; annulé " + r2.status + " (" + r2.code + ") ; inconnu " + r3.status, pass: r1.status === 422 && r1.code === "DATE_FUTURE" && r2.status === 422 && r2.code === "EVENEMENT_ANNULE" && r3.status === 404, detail: "La feuille se saisit le jour de l'événement ou après ; un événement annulé (A5) ne prend plus de présence." } } },
+
+  /* ── G3 · Absences, excuses et historiques ── */
+  { id: "T10", g: 3, titre: "Consulter les absences ; identifier les absences excusées", attendu: "10 absences (7 non excusées + 3 excusées) ; filtre « excusées » → 3 lignes avec motif et justificatif ; recalcul indépendant identique",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const r = await call("events.absences", t, {}); const j = await call("events.absences", t, { justifiee: "excuse" }); const n = await call("events.absences", t, { justifiee: "absent" }); const rc = await recalc(t); const toutesJust = j.data.every(x => x.statut === "excuse" && x.motif_excuse && x.justificatif); return { obtenu: r.data.length + " absences (" + n.data.length + " non excusées, " + j.data.length + " excusées, toutes avec motif + justificatif : " + toutesJust + ") ; recalcul : " + rc.absRows.length, pass: r.data.length === 10 && j.data.length === 3 && n.data.length === 7 && toutesJust && rc.absRows.length === 10, detail: "Fonctionnalités 6 et 7 : le registre distingue l'absent nu de l'absent excusé (A4) ; les événements annulés n'y figurent jamais (A5)." } } },
+  { id: "T11", g: 3, titre: "Historique d'un membre : chronologie complète et agrégats", attendu: "SANOGO : 12 événements au périmètre (7 comptabilisés, 4 planifiés, 1 annulé) ; 4 présents, 3 absents (dont l'événement de chantier), taux 57,1 % ; recalcul indépendant identique",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const r = await call("member.history", t, { matricule: "ADLCI-2025-0002" }); const compte = r.data.rows.filter(x => x.compte).length; const planif = r.data.rows.filter(x => !x.compte && /planifié/.test(x.raison)).length; const annul = r.data.rows.filter(x => !x.compte && /annulé/.test(x.raison)).length; const rc = await recalc(t); const san = rc.perMember["ADLCI-2025-0002"]; return { obtenu: r.data.rows.length + " événements (comptabilisés " + compte + ", planifiés " + planif + ", annulés " + annul + ") ; serveur : " + r.data.agg.presents + "P / " + r.data.agg.absents + "A / " + r.data.agg.excuses + "E, taux " + r.data.agg.taux + " % ; recalcul : " + san.presents + "P / " + san.absents + "A, taux " + san.taux + " %", pass: r.data.rows.length === 12 && compte === 7 && planif === 4 && annul === 1 && r.data.agg.presents === 4 && r.data.agg.absents === 3 && r.data.agg.taux === 57.1 && san.taux === 57.1, detail: "Fonctionnalité 8 : tout événement non comptabilisé porte sa raison (planifié, annulé, non concerné) — rien n'est tu." } } },
+  { id: "T12", g: 3, titre: "Un membre n'est évalué que pour les événements le concernant", attendu: "BAMBA : l'action de développement apparaît « non concerné » et ne compte pas (taux 75 %) ; OUÉDRAOGO (inactif) : un seul événement évaluable (l'AG d'avant sa désactivation)",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const ami = await call("member.history", t, { matricule: "ADLCI-2025-0003" }); const rowE7 = ami.data.rows.find(x => x.type === "developpement"); const ada = await call("member.history", t, { matricule: "ADLCI-2025-0005" }); return { obtenu: "BAMBA : " + ami.data.agg.evaluables + " évaluables, taux " + ami.data.agg.taux + " % ; action de développement : statut « " + rowE7.statut + " », comptabilisé : " + rowE7.compte + " (" + rowE7.raison + ") ; OUÉDRAOGO : " + ada.data.rows.length + " événement(s), taux " + ada.data.agg.taux + " %", pass: ami.data.agg.evaluables === 6 && ami.data.agg.taux === 75 && rowE7.statut === "non_concerne" && rowE7.compte === false && ada.data.rows.length === 1 && ada.data.agg.taux === 100, detail: "Règle imposée + A2 : le statut « non concerné » sort l'événement de l'évaluation ; ADA désactivé n'a été concerné que par l'AG du 05/07." } } },
+  { id: "T13", g: 3, titre: "Le membre ordinaire consulte sa participation et le registre (A3 : consultation ouverte)", attendu: "k.yao voit sa participation → 200 (taux 100 % à ce stade) ; il consulte aussi l'historique d'un autre membre → 200 (A3)",
+    async fn() { const tm = (await login(...CREDS.membre)).data.token; const own = await call("member.history", tm, { matricule: "ADLCI-2025-0001" }); const autre = await call("member.history", tm, { matricule: "ADLCI-2025-0002" }); const abs = await call("events.absences", tm, {}); return { obtenu: "sa participation " + own.status + " (taux " + own.data.agg.taux + " %) ; autre membre " + autre.status + " ; registre des absences " + abs.status + " (" + abs.data.length + " lignes)", pass: own.status === 200 && own.data.agg.taux === 100 && autre.status === 200 && abs.status === 200, detail: "A3 : la consultation est ouverte à tous, la saisie et les corrections restent réservées — vérifié côté serveur." } } },
+
+  /* ── G4 · Corrections historisées, annulation, traçabilité ── */
+  { id: "T14", g: 4, titre: "Corriger un statut : ancien → nouveau + auteur + motif, au journal", attendu: "présent → absent pour KOU (motif ≥ 10 caractères) → 200 ; entrée au journal avec ancien « present », nouveau « absent » ; taux mis à jour (85,7 %)",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const ex = (await call("events.export", t, {})).data; const eid = ex.events.find(e => e.titre.startsWith("Réunion de chantier")).id; const r = await call("events.correct", t, { event_id: eid, matricule: "ADLCI-2025-0001", nouveau_statut: "absent", motif: "Erreur d'appel : arrivé après le tour de table — corrigé en réunion du bureau" }); const ex2 = (await call("events.export", t, {})).data; const c = ex2.corrections.find(x => x.event_id === eid && x.matricule === "ADLCI-2025-0001"); const h = await call("member.history", t, { matricule: "ADLCI-2025-0001" }); return { obtenu: r.status + " — journal : " + (c ? c.ancien + " → " + c.nouveau + " par " + c.actor : "ABSENT") + " ; taux KOU : " + h.data.agg.taux + " %", pass: r.status === 200 && c && c.ancien === "present" && c.nouveau === "absent" && h.data.agg.taux === 85.7, detail: "Règle imposée : les corrections sont historisées — qui, quand, champ, ancien → nouveau, motif. A3 : sans approbation présidentielle (contrairement aux corrections financières V7)." } } },
+  { id: "T15", g: 4, titre: "Corrections réservées et motivées", attendu: "motif court → 422 MOTIF_REQUIS ; président → 403 ; membre ordinaire → 403",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const tp = (await login(...CREDS.president)).data.token; const tm = (await login(...CREDS.membre)).data.token; const ex = (await call("events.export", t, {})).data; const eid = ex.events.find(e => e.titre.startsWith("Réunion de chantier")).id; const r1 = await call("events.correct", t, { event_id: eid, matricule: "ADLCI-2025-0001", nouveau_statut: "present", motif: "court" }); const r2 = await call("events.correct", tp, { event_id: eid, matricule: "ADLCI-2025-0001", nouveau_statut: "present", motif: "Correction tentée par le président du bureau" }); const r3 = await call("events.correct", tm, { event_id: eid, matricule: "ADLCI-2025-0001", nouveau_statut: "present", motif: "Correction tentée par un membre ordinaire" }); return { obtenu: "motif court " + r1.status + " (" + r1.code + ") ; président " + r2.status + " ; membre " + r3.status, pass: r1.status === 422 && r1.code === "MOTIF_REQUIS" && r2.status === 403 && r3.status === 403, detail: "A3 : seuls le secrétaire général et l'administrateur corrigent — le président consulte, le membre consulte." } } },
+  { id: "T16", g: 4, titre: "Chaîne de corrections : deux corrections successives préservent tout l'historique", attendu: "absent → excusé → présent : 2 entrées au journal pour la même participation, valeur courante « present », rien n'est écrasé",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const ex = (await call("events.export", t, {})).data; const eid = ex.events.find(e => e.titre.startsWith("Réunion de chantier")).id; const r1 = await call("events.correct", t, { event_id: eid, matricule: "ADLCI-2025-0002", nouveau_statut: "excuse", motif: "Confirmation tardive : excuse transmise après l'appel — certificat à l'appui", motif_excuse: "Retard de transmission du certificat médical" }); const r2 = await call("events.correct", t, { event_id: eid, matricule: "ADLCI-2025-0002", nouveau_statut: "present", motif: "Vérification de la feuille papier : SANOGO a signé la présence — erreur à l'appel" }); const ex2 = (await call("events.export", t, {})).data; const cs = ex2.corrections.filter(x => x.event_id === eid && x.matricule === "ADLCI-2025-0002"); const p = ex2.participations.find(x => x.event_id === eid && x.matricule === "ADLCI-2025-0002"); const h = await call("member.history", t, { matricule: "ADLCI-2025-0002" }); return { obtenu: cs.length + " entrées (" + cs.map(c => c.ancien + "→" + c.nouveau).join(", ") + ") ; statut courant : " + p.statut + " ; taux SANOGO : " + h.data.agg.taux + " %", pass: r1.status === 200 && r2.status === 200 && cs.length === 2 && cs[0].nouveau === "excuse" && cs[1].nouveau === "present" && p.statut === "present" && h.data.agg.taux === 71.4, detail: "Le journal des corrections est append-only : chaque étape reste visible — la valeur courante se déduit, l'historique ne se réécrit jamais." } } },
+  { id: "T17", g: 4, titre: "Corriger les informations d'un événement (lieu) : historisé champ par champ", attendu: "lieu modifié avec motif → 200, champ « lieu », ancien → nouveau au journal ; ré-envoi sans différence → 422 AUCUN_CHANGEMENT",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const ex = (await call("events.export", t, {})).data; const eid = ex.events.find(e => e.titre.startsWith("Cours d'alphabétisation")).id; const r1 = await call("events.correct_info", t, { event_id: eid, lieu: "Salle communautaire d'Abouyabêh", motif: "Le lieu a changé : la cour communautaire n'est pas disponible ce jour" }); const d = (await call("events.detail", t, { event_id: eid })).data; const c = (await call("events.export", t, {})).data.corrections.filter(x => x.event_id === eid && x.champ === "lieu"); const r2 = await call("events.correct_info", t, { event_id: eid, lieu: "Salle communautaire d'Abouyabêh", motif: "Tentative sans aucune différence" }); return { obtenu: "correction " + r1.status + " (" + r1.data.changements.join(", ") + ") ; lieu actuel : « " + d.event.lieu + " » ; journal : « " + c[0].ancien + " » → « " + c[0].nouveau + " » ; sans changement " + r2.status + " (" + r2.code + ")", pass: r1.status === 200 && d.event.lieu === "Salle communautaire d'Abouyabêh" && c.length === 1 && c[0].ancien === "Cour communautaire" && r2.status === 422 && r2.code === "AUCUN_CHANGEMENT", detail: "Les corrections portent aussi sur les informations de l'événement — même exigence de motif et de traçabilité." } } },
+  { id: "T18", g: 4, titre: "Annuler un événement (A5) : tracé, sans suppression, exclu de l'évaluation", attendu: "annulation avec motif → 200 statut « annule » ; participations conservées au journal ; absences et taux recalculés sans lui (SANOGO 66,7 %) ; présence refusée → 422",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const ex = (await call("events.export", t, {})).data; const eid = ex.events.find(e => e.titre.startsWith("Réunion de chantier")).id; const r = await call("events.cancel", t, { event_id: eid, motif: "Décision du bureau du 2026-11-18 : séance invalidée — quorum non atteint, la feuille sera refaite" }); const ex2 = (await call("events.export", t, {})).data; const ev2 = ex2.events.find(e => e.id === eid); const nbParts = ex2.participations.filter(x => x.event_id === eid).length; const abs = await call("events.absences", t, { justifiee: "absent" }); const h = await call("member.history", t, { matricule: "ADLCI-2025-0002" }); const f = await call("events.presence", t, { event_id: eid, entries: [{ matricule: "ADLCI-2025-0001", statut: "present" }] }); return { obtenu: r.status + " — statut " + ev2.statut + ", " + nbParts + " participation(s) conservée(s) ; absences non excusées : " + abs.data.length + " ; taux SANOGO : " + h.data.agg.taux + " % ; présence après annulation " + f.status + " (" + f.code + ")", pass: r.status === 200 && ev2.statut === "annule" && nbParts === 4 && abs.data.length === 6 && h.data.agg.taux === 66.7 && f.status === 422 && f.code === "EVENEMENT_ANNULE", detail: "A5 : l'annulation est tracée avec motif ; rien n'est supprimé ; l'événement sort des statistiques et de l'évaluation des membres." } } },
+  { id: "T19", g: 4, titre: "Aucune suppression ; journal d'audit intègre, falsification détectée", attendu: "events.delete et participation.delete → 404 ; chaîne intègre avant l'attaque ; altération simulée détectée et désignée",
+    async fn() { const t = (await login(...CREDS.admin)).data.token; const r1 = await call("events.delete", t, { event_id: 1 }); const r2 = await call("participation.delete", t, { id: 1 }); const v1 = await call("audit.verify", t); await call("audit.tamper_demo", t); const v2 = await call("audit.verify", t); return { obtenu: "delete événement " + r1.status + " ; delete participation " + r2.status + " ; chaîne avant : " + (v1.data.integre ? "intègre (" + v1.data.seq + " entrées)" : "compromise !") + " ; après altération : " + (v2.data.integre ? "non détectée (!)" : "DÉTECTÉE n° " + v2.data.seq), pass: r1.status === 404 && r2.status === 404 && v1.data.integre === true && v2.data.integre === false, detail: "Ni événement ni participation ni correction ne se suppriment : les endpoints n'existent pas ; la chaîne SHA-256 détecte toute altération." } } },
+
+  /* ── G5 · Statistiques, exclusions et contrat du classement ── */
+  { id: "T20", g: 5, titre: "Statistiques par membre : serveur === recalcul indépendant (A1)", attendu: "9 membres ; KOUASSI 100 %, SANOGO 66,7 %, BAMBA 75 %, CISSÉ 80 % ; chaque taux serveur égal au recalcul depuis les listes brutes",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const s = await call("stats.global", t, {}); const rc = await recalc(t); const parMat = {}; s.data.perMember.forEach(x => parMat[x.matricule] = x); let egaux = 0, diffs = []; for (const [mat, o] of Object.entries(rc.perMember)) { const x = parMat[mat]; (x && x.taux_presence === o.taux && x.presents === o.presents && x.absents === o.absents) ? egaux++ : diffs.push(mat); } const mK = parMat["ADLCI-2025-0001"], mS = parMat["ADLCI-2025-0002"], mA = parMat["ADLCI-2025-0003"], mF = parMat["ADLCI-2025-0004"]; return { obtenu: s.data.perMember.length + " membres ; KOUASSI " + mK.taux_presence + " %, SANOGO " + mS.taux_presence + " %, BAMBA " + mA.taux_presence + " %, CISSÉ " + mF.taux_presence + " % ; taux identiques au recalcul : " + egaux + "/" + Object.keys(rc.perMember).length + (diffs.length ? " — écarts : " + diffs.join(", ") : ""), pass: s.data.perMember.length === 9 && mK.taux_presence === 100 && mS.taux_presence === 66.7 && mA.taux_presence === 75 && mF.taux_presence === 80 && egaux === Object.keys(rc.perMember).length && diffs.length === 0, detail: "Fonctionnalité 9 : chaque taux = présents ÷ (présents + absents) — confronté au recalcul indépendant membre par membre." } } },
+  { id: "T21", g: 5, titre: "Une absence excusée ne pénalise pas le score (A1)", attendu: "AKA : 5 présents, 0 absent, 1 excusé → taux 100 % (si l'excusé comptait comme absent : 83,3 %) ; l'excusé est hors numérateur et dénominateur",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const s = await call("stats.global", t, {}); const nan = s.data.perMember.find(x => x.matricule === "ADLCI-2025-0006"); const simulé = Math.round(nan.presents / (nan.presents + nan.absents + nan.absents_excuses) * 1000) / 10; return { obtenu: "AKA : " + nan.presents + "P / " + nan.absents + "A / " + nan.absents_excuses + "E → taux serveur " + nan.taux_presence + " % ; contre-exemple (excusé compté comme absent) : " + simulé + " %", pass: nan.absents_excuses === 1 && nan.taux_presence === 100 && simulé === 83.3, detail: "A1 (option i validée) : l'excusé n'influence ni positivement ni négativement — le statut n'est jamais fusionné avec « absent »." } } },
+  { id: "T22", g: 5, titre: "Exclusions : annulés, planifiés et « non concerné » hors de tous les calculs", attendu: "6 événements terminés, 4 planifiés, 2 annulés ; 46 évaluables, 38 présents, 6 absents, 2 excusés ; BAMBA hors de l'action de développement ; SANOGO sans les événements annulés",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const ex = (await call("events.export", t, {})).data; const nb = { termine: 0, planifie: 0, annule: 0 }; ex.events.forEach(e => nb[e.statut]++); const s = await call("stats.global", t, {}); const rc = await recalc(t); const rk = (await call("stats.ranking", t, {})).data; const san = rk.membres.find(x => x.matricule === "ADLCI-2025-0002"); const ami = rk.membres.find(x => x.matricule === "ADLCI-2025-0003"); const evCulturelle = ex.events.find(e => e.type === "culturelle" && e.statut === "annule").id; const evChantier = ex.events.find(e => e.titre.startsWith("Réunion de chantier")).id; const evDevel = ex.events.find(e => e.type === "developpement").id; return { obtenu: nb.termine + " terminés / " + nb.planifie + " planifiés / " + nb.annule + " annulés ; totaux " + s.data.tot.evalues + " évaluables (" + s.data.tot.presents + "P/" + s.data.tot.absents + "A/" + s.data.tot.excuses + "E, taux " + s.data.tot.taux + " %) ; BAMBA sans développement : " + !ami.sources.includes(evDevel) + " ; SANOGO sans annulés : " + (!san.sources.includes(evChantier) && !san.sources.includes(evCulturelle)), pass: nb.termine === 6 && nb.planifie === 4 && nb.annule === 2 && s.data.tot.evalues === 46 && s.data.tot.presents === 38 && s.data.tot.absents === 6 && s.data.tot.excuses === 2 && s.data.tot.taux === 86.4 && s.data.tot.evalues === rc.tot.evalues && !ami.sources.includes(evDevel) && !san.sources.includes(evChantier) && !san.sources.includes(evCulturelle), detail: "A5 + règle du périmètre : rien d'annulé, de planifié ou de « non concerné » n'entre dans les compteurs — le champ sources rend le périmètre auditable." } } },
+  { id: "T23", g: 5, titre: "Contrat de données du classement futur : structure, types et cohérence", attendu: "12 champs exacts par membre ; formule A1 documentée ; Σ présents = recalcul (38) ; sources === périmètre recalculé ; aucun champ interne exposé",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const rk = (await call("stats.ranking", t, {})).data; const rc = await recalc(t); const attendus = ["matricule", "nom", "prenom", "tribu", "statut_membre", "evenements_evalues", "presents", "absents", "absents_excuses", "non_concernes", "taux_presence", "sources"].sort(); const badKeys = rk.membres.filter(m => JSON.stringify(Object.keys(m).sort()) !== JSON.stringify(attendus)); const sumP = rk.membres.reduce((s, m) => s + m.presents, 0); const badSources = rk.membres.filter(m => { const o = rc.perMember[m.matricule] || { sources: [] }; return JSON.stringify(m.sources.slice().sort((a, b) => a - b)) !== JSON.stringify(o.sources.slice().sort((a, b) => a - b)); }); const badTaux = rk.membres.filter(m => { const o = rc.perMember[m.matricule] || { taux: null }; return m.taux_presence !== o.taux; }); const leak = Object.keys(rk).concat(...rk.membres.map(m => Object.keys(m))).filter(k => /hash|salt|token|secret|pwd/i.test(k)); return { obtenu: rk.membres.length + " membres ; champs exacts : " + (badKeys.length === 0) + " ; Σ présents " + sumP + " (recalcul " + rc.tot.presents + ") ; sources conformes : " + (badSources.length === 0) + " ; taux conformes : " + (badTaux.length === 0) + " ; fuite de champs : " + (leak.length ? leak.join(",") : "aucune") + " ; formule : " + rk.formule.slice(0, 72) + "…", pass: rk.membres.length === 9 && badKeys.length === 0 && sumP === rc.tot.presents && badSources.length === 0 && badTaux.length === 0 && leak.length === 0 && /excusées/.test(rk.formule) && /concerné/.test(rk.formule), detail: "Le futur module de classement consommera cette projection telle quelle : champ taux_presence conforme à A1, périmètre auditable, formule embarquée." } } },
+  { id: "T24", g: 5, titre: "Charge XSS dans un titre, DTO propre, jeton forgé rejeté", attendu: "titre malveillant stocké mais rendu échappé (0 nœud injecté) ; aucun champ sensible dans les DTO ; jeton forgé → 401",
+    async fn() { const t = (await login(...CREDS.secretaire)).data.token; const r = await call("events.create", t, { type: "autre", titre: "<img src=x onerror=alert(1)>", date: "2026-11-10", lieu: "Salle de test", concernes: ["ADLCI-2025-0001"] }); const probe = document.createElement("div"); probe.innerHTML = "<p>" + esc(r.data.titre) + "</p>"; const inj = probe.querySelectorAll("img,script").length; const keys = new Set(); const ex = (await call("events.export", t, {})).data; [ex.events, ex.participations, ex.corrections].forEach(list => list.forEach(o => Object.keys(o).forEach(k => keys.add(k)))); const leak = [...keys].filter(k => /hash|salt|token|secret|pwd/i.test(k)); const f = await call("events.list", "forged" + "a".repeat(56), {}); return { obtenu: "création " + r.status + " ; rendu : " + (inj === 0 ? "échappé" : inj + " nœuds injectés (!)") + " ; " + keys.size + " champs exposés" + (leak.length ? " — FUITE : " + leak.join(", ") : ", aucune fuite") + " ; jeton forgé " + f.status, pass: r.status === 200 && inj === 0 && leak.length === 0 && f.status === 401, detail: "Le serveur stocke la valeur ; l'affichage échappe systématiquement ; les DTO ne portent aucun champ interne." } } }
+];
+
+async function runBench() {
+  const t0 = performance.now();
+  await SERVER.seed();
+  const out = [];
+  for (const sc of BENCH) {
+    try { const r = await sc.fn(); out.push({ ...sc, ...r }); }
+    catch (e) { out.push({ ...sc, obtenu: "exception : " + e.message, pass: false, detail: "" }); }
+  }
+  const ms = Math.round(performance.now() - t0);
+  const pass = out.filter(r => r.pass).length;
+  BENCH_RESULTS = { date: new Date().toLocaleString("fr-FR"), module: "réunions et activités v1.0", total: out.length, pass, fail: out.length - pass, ms, scenarios: out };
+  await doLogout(true, true);
+  await SERVER.seed();
+  renderBench(out, pass, out.length, ms);
+  toast(pass === out.length ? "ok" : "err", pass === out.length ? "Suite complète : " + pass + "/" + out.length + " scénarios conformes — calculs vérifiés par recalcul indépendant." : "Suite terminée avec " + (out.length - pass) + " écart(s) — voir le détail.");
+}
+/* ==================================================================
+   CONSOLE D'INTRUSION
+   ================================================================== */
+const ATTACKS = [
+  { t: "Un membre ordinaire saisit la feuille de présence", d: "k.yao appelle events.presence directement — A3 : la saisie est réservée au secrétaire général et à l'administrateur.", async run() { const t = (await login(...CREDS.membre)).data.token; return await call("events.presence", t, { event_id: 3, entries: [{ matricule: "ADLCI-2025-0001", statut: "present" }] }); } },
+  { t: "Le président crée une réunion", d: "m.kante appelle events.create — le président consulte mais ne saisit pas (A3).", async run() { const t = (await login(...CREDS.president)).data.token; return await call("events.create", t, { type: "reunion", date: "2026-12-22", lieu: "Siège" }); } },
+  { t: "Le trésorier corrige un statut de participation", d: "a.traore appelle events.correct — le trésorier saisit les finances (module 6h), pas les présences (A3).", async run() { const t = (await login(...CREDS.tresorier)).data.token; return await call("events.correct", t, { event_id: 3, matricule: "ADLCI-2025-0001", nouveau_statut: "absent", motif: "Correction tentée par le trésorier hors de son module" }); } },
+  { t: "Supprimer un événement et sa feuille", d: "Le secrétaire général lui-même tente events.delete — l'endpoint n'existe pas : aucune suppression.", async run() { const t = (await login(...CREDS.secretaire)).data.token; return await call("events.delete", t, { event_id: 1 }); } },
+  { t: "Corriger sans motif valable", d: "Le secrétaire général tente une correction avec un motif de 4 caractères — motif ≥ 10 caractères obligatoire.", async run() { const t = (await login(...CREDS.secretaire)).data.token; return await call("events.correct", t, { event_id: 3, matricule: "ADLCI-2025-0001", nouveau_statut: "absent", motif: "oops" }); } }
+];
+/* ==================================================================
+   INTERFACE CLIENT — présentation uniquement, aucune sécurité ici
+   ================================================================== */
+const $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
+function toast(kind, msg) { const t = document.createElement("div"); t.className = "toast " + (kind === "ok" ? "ok" : kind === "err" ? "err" : ""); t.textContent = msg; $("#toasts").appendChild(t); setTimeout(() => { t.style.opacity = "0"; t.style.transition = "opacity .4s"; setTimeout(() => t.remove(), 400); }, 4500); }
+const initials = n => String(n).split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
+const norm2 = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+const MOIS_NOM = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+
+let SESSION = { token: null, user: null, perms: [] };
+const TABS = [
+  { id: "events", label: "Événements", perm: "events.view" },
+  { id: "absences", label: "Absences", perm: "events.view" },
+  { id: "historique", label: "Historiques", perm: "events.view" },
+  { id: "stats", label: "Statistiques", perm: "events.view" },
+  { id: "own", label: "Ma participation", perm: "events.view", ownOnly: true },
+  { id: "bench", label: "Banc de tests", always: true },
+  { id: "intrusion", label: "Console d'intrusion", always: true },
+  { id: "archi", label: "Règles & production", always: true }
+];
+function buildNav() {
+  const nav = $("#topnav"); nav.innerHTML = "";
+  if (!SESSION.token) { nav.innerHTML = `<button class="on" data-tab="login">Connexion</button>`; $$("#topnav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab))); return; }
+  const vis = TABS.filter(t => t.always || (t.perm && SESSION.perms.includes(t.perm) && (!t.ownOnly || SESSION.user.matricule)));
+  nav.innerHTML = vis.map((t, i) => `<button data-tab="${t.id}"${i === 0 ? ` class="on"` : ``}>${t.label}</button>`).join("");
+  $$("#topnav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+  showTab(vis[0].id);
+}
+function showTab(id) {
+  $$(".tab").forEach(v => v.classList.remove("on"));
+  const el = $("#v-" + id); if (el) el.classList.add("on");
+  $$("#topnav button").forEach(b => b.classList.toggle("on", b.dataset.tab === id));
+  window.scrollTo({ top: 0 });
+  if (id === "events") renderEvents();
+  if (id === "feuille") renderFeuille();
+  if (id === "absences") renderAbsences();
+  if (id === "historique") renderHistorique();
+  if (id === "stats") renderStats();
+  if (id === "own") renderOwn();
+  if (id === "intrusion") renderAttacks();
+  if (id === "archi") renderArchi();
+}
+function showTabTab(id) { $$(".tab").forEach(v => v.classList.remove("on")); $("#v-" + id).classList.add("on"); $$("#topnav button").forEach(b => b.classList.toggle("on", b.dataset.tab === id)); }
+const STATUT_TAG = s => s === "present" ? `<span class="tag ok">Présent</span>` : s === "absent" ? `<span class="tag bad">Absent</span>` : s === "excuse" ? `<span class="tag info">Absent excusé</span>` : s === "non_concerne" ? `<span class="tag neutral">Non concerné</span>` : `<span class="tag neutral">Non renseigné</span>`;
+const EV_TAG = s => s === "termine" ? `<span class="tag ok">Terminé</span>` : s === "annule" ? `<span class="tag bad">Annulé</span>` : `<span class="tag warn">Planifié</span>`;
+
+/* ── Événements : liste et KPIs ── */
+let EV = { rows: [], members: [], tot: null };
+async function renderEvents() {
+  const [rL, rS] = await Promise.all([
+    SERVER.api({ endpoint: "events.list", token: SESSION.token }),
+    SERVER.api({ endpoint: "stats.global", token: SESSION.token })
+  ]);
+  if (rL.status !== 200) { doLogout(true); return; }
+  EV.rows = rL.data; EV.tot = rS.data.tot;
+  const canCreate = SESSION.perms.includes("events.create");
+  $("#btn-create-open").style.display = canCreate ? "" : "none";
+  $("#k-termine").textContent = EV.tot.eventsTermine;
+  $("#k-taux").textContent = EV.tot.taux === null ? "n/a" : EV.tot.taux + " %";
+  $("#k-abs").textContent = EV.tot.absents;
+  $("#k-excuse").textContent = EV.tot.excuses;
+  drawEventsTable();
+  if (!EV.members.length && SESSION.perms.includes("members.view_all")) {
+    const rM = await SERVER.api({ endpoint: "members.list", token: SESSION.token });
+    if (rM.status === 200) {
+      EV.members = rM.data;
+      $("#ev-concernes").innerHTML = EV.members.map(m => `<label title="${esc(m.tribu)}"><input type="checkbox" value="${m.matricule}" data-statut="${m.statut}"> <span class="mat">${m.matricule}</span> ${esc(m.nom + " " + m.prenom)}${m.statut === "inactif" ? " <span class=\"tag neutral\">inactif</span>" : ""}</label>`).join("");
+      Object.entries(SERVER.TYPES).forEach(([k, v]) => $("#ev-ftype").insertAdjacentHTML("beforeend", `<option value="${k}">${esc(v)}</option>`));
+      preMarquerActifs();
+    }
+  }
+}
+function preMarquerActifs() {
+  const type = $("#ev-type").value;
+  if (type === "reunion" || type === "ag") $$("#ev-concernes input[data-statut='actif']").forEach(cb => cb.checked = true);
+}
+function drawEventsTable() {
+  const q = norm2($("#ev-q").value), ft = $("#ev-ftype").value, fs = $("#ev-fstatut").value;
+  const rows = EV.rows.filter(e => (!q || norm2(e.titre).includes(q) || norm2(e.lieu).includes(q)) && (!ft || e.type === ft) && (!fs || e.statut === fs));
+  $("#ev-tbl tbody").innerHTML = rows.map(e => {
+    const c = e.counts;
+    const feuille = e.statut === "annule" ? `<span class="tag bad">hors évaluation (A5)</span>`
+      : `${c.present} P · ${c.absent} A · ${c.excuse} E · ${c.non_concerne} NC${c.non_renseigne ? ` · <span class="tag warn">${c.non_renseigne} à saisir</span>` : ""}`;
+    return `<tr>
+    <td data-l="Date" class="mono">${esc(e.date)}</td>
+    <td data-l="Événement"><b>${esc(e.titre)}</b><br><span class="tag gold">${esc(e.type_label)}</span></td>
+    <td data-l="Lieu">${esc(e.lieu)}</td>
+    <td data-l="Concernés" class="num">${c.present + c.absent + c.excuse + c.non_concerne + c.non_renseigne}</td>
+    <td data-l="Feuille">${feuille}</td>
+    <td data-l="Statut">${EV_TAG(e.statut)}${e.statut === "annule" ? `<br><small style="color:var(--ink-3)">${esc(e.annule_motif || "")}</small>` : ""}</td>
+    <td class="act"><button class="btn ghost sm" data-feuille="${e.id}">Feuille</button></td></tr>`;
+  }).join("") || `<tr><td colspan="7" style="color:var(--ink-3)">Aucun événement pour ces filtres.</td></tr>`;
+  $$("#ev-tbl [data-feuille]").forEach(b => b.addEventListener("click", () => openFeuille(+b.dataset.feuille)));
+}
+
+/* ── Création en deux étapes + générateur V11.1/A6 ── */
+let EV_DRAFT = null;
+function prefillGen() {
+  const mois = $("#ev-gen-mois").value;
+  if (!/^\d{4}-\d{2}$/.test(mois)) { toast("err", "Choisissez d'abord le mois : la réunion ordinaire se tient chaque 15 (V11.1)."); return; }
+  $("#ev-type").value = "reunion";
+  $("#ev-date").value = mois + "-15";
+  $("#ev-titre").value = "Réunion ordinaire de " + MOIS_NOM[Number(mois.slice(5)) - 1] + " " + mois.slice(0, 4);
+  if (!$("#ev-lieu").value.trim()) $("#ev-lieu").value = "Siège ADL-CI, Cocody";
+  preMarquerActifs();
+  toast("ok", "Réunion du 15 préremplie : vérifiez le périmètre (A2) puis préparez le résumé.");
+}
+function previewCreate() {
+  const type = $("#ev-type").value;
+  const body = { type, titre: $("#ev-titre").value.trim(), date: $("#ev-date").value, lieu: $("#ev-lieu").value.trim(), notes: $("#ev-notes").value.trim() };
+  const checks = [...document.querySelectorAll("#ev-concernes input[type=checkbox]:checked")];
+  const concernes = checks.map(cb => cb.value);
+  let ok = true;
+  [["f-ev-date", !!body.date], ["f-ev-lieu", body.lieu.length >= 3]].forEach(([f, v]) => { $("#" + f).classList.toggle("err", !v); if (!v) ok = false; });
+  if (!ok) { $("#ev-preview-zone").innerHTML = `<div class="note err"><span>⚠️</span><span><b>Champs obligatoires manquants :</b> la date et le lieu sont requis (fonctionnalité 3).</span></div>`; $("#ev-confirm-zone").style.display = "none"; return; }
+  if (!concernes.length && !(type === "reunion" || type === "ag")) {
+    $("#ev-preview-zone").innerHTML = `<div class="note err"><span>⚠️</span><span><b>Périmètre requis :</b> pour ce type, sélectionnez au moins un membre concerné (A2).</span></div>`;
+    $("#ev-confirm-zone").style.display = "none"; return;
+  }
+  EV_DRAFT = { ...body, concernes: concernes.length ? concernes : undefined };
+  const nomPar = mat => { const m = EV.members.find(x => x.matricule === mat); return m ? m.nom + " " + m.prenom : mat; };
+  const liste = (EV_DRAFT.concernes || []).map(m => `<span class="mat">${esc(m)}</span> ${esc(nomPar(m))}`).join(" · ") || "<i>tous les actifs (défaut A2, confirmé par le serveur)</i>";
+  $("#ev-preview-zone").innerHTML = `<div class="af-box"><b>${esc(SERVER.TYPES[type])} — ${esc(EV_DRAFT.titre || "titre généré par défaut")}</b>
+    <div style="margin-top:7px"><div class="af-row"><span>Date</span><b>${esc(body.date)}</b></div><div class="af-row"><span>Lieu</span><b>${esc(body.lieu)}</b></div>
+    <div class="af-row"><span>Concernés</span><b>${EV_DRAFT.concernes ? EV_DRAFT.concernes.length + " membre(s)" : "actifs par défaut (A2)"}</b></div>
+    ${body.notes ? `<div class="af-row"><span>Notes</span><span>${esc(body.notes)}</span></div>` : ""}</div>
+    <p style="font-size:12px;color:var(--ink-3);margin-top:8px">Périmètre : ${liste}</p></div>`;
+  $("#ev-confirm-zone").style.display = "block";
+  $("#ev-result").innerHTML = "";
+}
+async function confirmCreate() {
+  if (!EV_DRAFT) return;
+  const r = await SERVER.api({ endpoint: "events.create", token: SESSION.token, body: EV_DRAFT });
+  $("#ev-result").innerHTML = `<div class="note ${r.status === 200 ? "ok" : "err"}"><span>${r.status === 200 ? "✓" : "⚠️"}</span><span><b>${esc(r.msg)}</b>${r.auditId ? ` (journal n° ${r.auditId})` : ""}</span></div>`;
+  if (r.status === 200) { toast("ok", r.msg.slice(0, 130)); EV_DRAFT = null; $("#ev-confirm-zone").style.display = "none"; $("#ev-preview-zone").innerHTML = `<div class="note info"><span>ℹ️</span><span><b>Événement créé.</b> Ouvrez sa feuille de présence le jour venu.</span></div>`; renderEvents(); }
+  else toast("err", r.msg.slice(0, 150));
+}
+
+/* ── Feuille de présence ── */
+let FEUILLE_ID = null, FEUILLE_BACK = "events", CORR = null;
+async function openFeuille(id, back) { FEUILLE_ID = id; if (back) FEUILLE_BACK = back; showTabTab("feuille"); await renderFeuille(); }
+async function renderFeuille() {
+  const r = await SERVER.api({ endpoint: "events.detail", token: SESSION.token, body: { event_id: FEUILLE_ID } });
+  if (r.status !== 200) { toast("err", r.msg); showTabTab(FEUILLE_BACK); return; }
+  const ev = r.data.event, ps = r.data.participations, cors = r.data.corrections;
+  const canEdit = SESSION.perms.includes("events.presence"), canCorr = SESSION.perms.includes("events.correction");
+  const past = ev.date <= SERVER.AUJ.date, annule = ev.statut === "annule", termine = ev.statut === "termine";
+  $("#feuille-title").textContent = ev.titre + " — " + ev.date;
+  $("#feuille-statut").innerHTML = EV_TAG(ev.statut);
+  $("#feuille-infos").innerHTML = `<dl class="dl">
+    <dt>Type</dt><dd><span class="tag gold">${esc(ev.type_label)}</span></dd>
+    <dt>Date</dt><dd><b>${esc(ev.date)}</b></dd><dt>Lieu</dt><dd>${esc(ev.lieu)}</dd>
+    <dt>Créé par</dt><dd>${esc(ev.cree_par)} le ${esc(ev.cree_le)}</dd>
+    ${ev.notes ? `<dt>Notes</dt><dd>${esc(ev.notes)}</dd>` : ""}
+    ${ev.statut === "annule" ? `<dt>Annulation</dt><dd>${esc(ev.annule_motif)} — par ${esc(ev.annule_par)} le ${esc(ev.annule_le)}</dd>` : ""}</dl>`;
+  const nr = ev.counts.non_renseigne;
+  let note = "";
+  if (annule) note = `<div class="note err"><span>⚠️</span><span><b>Événement annulé (A5).</b> La feuille est conservée mais l'événement est exclu des statistiques et de l'évaluation.</span></div>`;
+  else if (!past) note = `<div class="note info"><span>ℹ️</span><span><b>Événement futur.</b> La feuille de présence se saisit le jour de l'événement ou après.</span></div>`;
+  else if (nr) note = `<div class="note warn"><span>⚠️</span><span><b>${nr} statut(s) non renseigné(s).</b> Chaque membre concerné doit porter un des quatre statuts — la clôture sera refusée sinon (choix d'implémentation, qualité du classement).</span></div>`;
+  else if (termine) note = `<div class="note ok"><span>✓</span><span><b>Feuille complète, événement clôturé.</b> Toute modification passe par une correction historisée.</span></div>`;
+  $("#feuille-note").innerHTML = note;
+  $("#btn-feuille-allp").style.display = canEdit && !annule && past && nr ? "" : "none";
+  $("#btn-feuille-save").style.display = canEdit && !annule && past ? "" : "none";
+  $("#btn-feuille-closeev").style.display = canEdit && !annule && past && !termine ? "" : "none";
+  $("#btn-feuille-cancel").style.display = canEdit && !annule ? "" : "none";
+  $("#feuille-count").textContent = ps.length + " membre(s) au périmètre (A2)";
+  $("#feuille-tbl tbody").innerHTML = ps.map(p => {
+    const editable = canEdit && !annule && past && p.statut === null;
+    const saisie = p.saisi_par ? `${esc(p.saisi_par)} le ${esc(p.saisi_le)}` : "—";
+    const motif = p.motif_excuse ? `Motif : ${esc(p.motif_excuse)}${p.justificatif ? ` · 📎 ${esc(p.justificatif)}` : ""}` : (p.statut === "non_concerne" ? "Hors périmètre d'évaluation" : "—");
+    const action = editable
+      ? `<div class="pres-opts">${["present", "absent", "excuse", "non_concerne"].map(s => `<label><input type="radio" name="rs-${p.id}" value="${s}">${s === "present" ? "Présent" : s === "absent" ? "Absent" : s === "excuse" ? "Excusé" : "Non concerné"}</label>`).join("")}</div>
+         <div class="pres-x"><input id="rx-${p.id}" placeholder="Motif si excusé (A4)" disabled><input id="rj-${p.id}" placeholder="Justificatif (facultatif)" disabled></div>`
+      : (canCorr && !annule && past && p.statut !== null ? `<button class="btn ghost sm" data-corr="${p.id}">Corriger</button>` : `<span style="color:var(--ink-3)">—</span>`);
+    return `<tr>
+      <td data-l="Membre"><div class="cell-name"><span class="ava">${initials(p.prenom + " " + p.nom)}</span><span class="n"><b>${esc(p.nom + " " + p.prenom)}</b><small>${esc(p.tribu)} · <span class="mat">${p.matricule}</span>${p.statut_membre === "inactif" ? " · inactif" : ""}</small></span></div></td>
+      <td data-l="Statut">${STATUT_TAG(p.statut)}</td>
+      <td data-l="Présence saisie"><small>${saisie}</small></td>
+      <td data-l="Motif / justificatif"><small>${motif}</small>${editable ? "" : ""}</td>
+      <td class="act" data-l="Action">${action}</td></tr>`;
+  }).join("");
+  $$("#feuille-tbl input[type=radio]").forEach(rad => rad.addEventListener("change", () => {
+    const pid = rad.name.slice(3);
+    const on = (document.querySelector(`input[name="rs-${pid}"]:checked`) || {}).value === "excuse";
+    const ex = $("#rx-" + pid), ju = $("#rj-" + pid);
+    if (ex) ex.disabled = !on; if (ju) ju.disabled = !on;
+  }));
+  $$("#feuille-tbl [data-corr]").forEach(b => b.addEventListener("click", () => {
+    const p = ps.find(x => x.id === +b.dataset.corr);
+    CORR = { event_id: ev.id, matricule: p.matricule, statut: p.statut };
+    $("#corr-qui").innerHTML = `Correction de la participation de <b>${esc(p.nom + " " + p.prenom)}</b> (<span class="mat">${p.matricule}</span>) sur « ${esc(ev.titre)} » — statut actuel : ${STATUT_TAG(p.statut)}`;
+    $("#corr-statut").value = p.statut === "excuse" ? "excuse" : p.statut;
+    $("#corr-motif").value = ""; $("#corr-exc").value = ""; $("#corr-just").value = "";
+    toggleCorrExc(); $("#panel-corr").style.display = "block"; $("#corr-result").innerHTML = "";
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  }));
+  const rows = cors.map(c => `<tr>
+    <td data-l="Quand" class="mono">${esc(c.ts)}</td><td data-l="Auteur">${esc(c.actor)}<br><small style="color:var(--ink-3)">${esc(c.role)}</small></td>
+    <td data-l="Membre">${c.matricule ? `<span class="mat">${esc(c.matricule)}</span>` : "—"}</td><td data-l="Champ">${esc(c.champ)}</td>
+    <td data-l="Ancien → Nouveau"><span class="mono">${esc(c.champ === "statut" ? (STATUT_LBL[c.ancien] || c.ancien) + " → " + (STATUT_LBL[c.nouveau] || c.nouveau) : c.ancien + " → " + c.nouveau)}</span></td>
+    <td data-l="Motif"><small>${esc(c.motif)}</small></td></tr>`).join("");
+  $("#fc-tbl tbody").innerHTML = rows || `<tr><td colspan="6" style="color:var(--ink-3)">Aucune correction sur cet événement.</td></tr>`;
+  $("#corr-count").textContent = cors.length + " entrée(s) — historique définitif";
+}
+function toggleCorrExc() {
+  const on = $("#corr-statut").value === "excuse";
+  $("#f-corr-exc").style.display = on ? "" : "none";
+  $("#f-corr-just").style.display = on ? "" : "none";
+}
+async function saveFeuille() {
+  const entries = [];
+  $$("#feuille-tbl input[type=radio]:checked").forEach(rad => {
+    const pid = rad.name.slice(3);
+    const row = rad.closest("tr");
+    const mat = (row.querySelector(".mat") || {}).textContent;
+    const ex = $("#rx-" + pid), ju = $("#rj-" + pid);
+    const entry = { matricule: mat, statut: rad.value };
+    if (rad.value === "excuse") entry.motif_excuse = ex ? ex.value.trim() : "";
+    if (ju && ju.value.trim()) entry.justificatif = ju.value.trim();
+    entries.push(entry);
+  });
+  if (!entries.length) { toast("err", "Cochez au moins un statut avant d'enregistrer."); return; }
+  const r = await SERVER.api({ endpoint: "events.presence", token: SESSION.token, body: { event_id: FEUILLE_ID, entries } });
+  toast(r.status === 200 ? "ok" : "err", r.msg.slice(0, 160));
+  if (r.status !== 200) $("#feuille-note").innerHTML = `<div class="note err"><span>⚠️</span><span><b>${esc(r.msg)}</b></span></div>`;
+  renderFeuille();
+}
+function allPresent() {
+  $$("#feuille-tbl input[type=radio][value='present']").forEach(rad => {
+    const pid = rad.name.slice(3);
+    const already = document.querySelector(`input[name="rs-${pid}"]`) && document.querySelector(`input[name="rs-${pid}"]:checked`);
+    if (!already) { rad.checked = true; const ex = $("#rx-" + pid), ju = $("#rj-" + pid); if (ex) ex.disabled = true; if (ju) ju.disabled = true; }
+  });
+  toast("ok", "Tous les statuts manquants mis à « présent » — vérifiez puis enregistrez la feuille.");
+}
+async function closeEv() {
+  if (!confirm("Clôturer cet événement ? Il entrera dans les statistiques et l'évaluation des membres (A5).")) return;
+  const r = await SERVER.api({ endpoint: "events.close", token: SESSION.token, body: { event_id: FEUILLE_ID } });
+  toast(r.status === 200 ? "ok" : "err", r.msg.slice(0, 160));
+  renderFeuille();
+}
+async function cancelEv() {
+  const motif = prompt("Motif de l'annulation (minimum 10 caractères — A5 : l'annulation est tracée et l'événement reste enregistré) :") || "";
+  if (!motif) { toast("err", "Annulation abandonnée : un motif est nécessaire."); return; }
+  const r = await SERVER.api({ endpoint: "events.cancel", token: SESSION.token, body: { event_id: FEUILLE_ID, motif } });
+  toast(r.status === 200 ? "ok" : "err", r.msg.slice(0, 160));
+  renderFeuille();
+}
+async function applyCorr() {
+  if (!CORR) return;
+  const body = { event_id: CORR.event_id, matricule: CORR.matricule, nouveau_statut: $("#corr-statut").value, motif: $("#corr-motif").value.trim(), motif_excuse: $("#corr-exc").value.trim(), justificatif: $("#corr-just").value.trim() };
+  const r = await SERVER.api({ endpoint: "events.correct", token: SESSION.token, body });
+  $("#corr-result").innerHTML = `<div class="note ${r.status === 200 ? "ok" : "err"}"><span>${r.status === 200 ? "✓" : "⚠️"}</span><span><b>${esc(r.msg)}</b>${r.auditId ? ` (journal n° ${r.auditId})` : ""}</span></div>`;
+  if (r.status === 200) { toast("ok", "Correction historisée."); CORR = null; $("#panel-corr").style.display = "none"; renderFeuille(); }
+}
+
+/* ── Absences ── */
+let AB_MEMBERS = null;
+async function renderAbsences() {
+  const r = await SERVER.api({ endpoint: "events.absences", token: SESSION.token, body: { matricule: $("#ab-mat").value || undefined, justifiee: $("#ab-just").value || undefined } });
+  if (r.status !== 200) return;
+  if (!AB_MEMBERS) {
+    const uniq = new Map();
+    SERVER.api({ endpoint: "events.absences", token: SESSION.token }).then(all => {
+      if (all.status === 200) all.data.forEach(x => uniq.set(x.matricule, x.nom + " " + x.prenom));
+      [...uniq.entries()].sort((a, b) => a[1].localeCompare(b[1], "fr")).forEach(([mat, nom]) => $("#ab-mat").insertAdjacentHTML("beforeend", `<option value="${mat}">${esc(nom)} (${mat})</option>`));
+      AB_MEMBERS = true;
+    });
+  }
+  $("#ab-tbl tbody").innerHTML = r.data.map(x => `<tr>
+    <td data-l="Date" class="mono">${esc(x.date)}</td><td data-l="Événement"><b>${esc(x.titre)}</b><br><small style="color:var(--ink-3)">${esc(x.lieu)}</small></td>
+    <td data-l="Type"><span class="tag gold">${esc(x.type_label)}</span></td>
+    <td data-l="Membre"><div class="cell-name"><span class="ava">${initials(x.prenom + " " + x.nom)}</span><span class="n"><b>${esc(x.nom + " " + x.prenom)}</b><small><span class="mat">${x.matricule}</span></small></span></div></td>
+    <td data-l="Statut">${x.statut === "excuse" ? `<span class="tag info">Absent excusé</span>` : `<span class="tag bad">Absent</span>`}</td>
+    <td data-l="Motif d'excuse"><small>${x.motif_excuse ? esc(x.motif_excuse) : `<span style="color:var(--ink-3)">aucun (absence non excusée)</span>`}</small></td>
+    <td data-l="Justificatif">${x.justificatif ? `📎 ${esc(x.justificatif)}` : `<span style="color:var(--ink-3)">—</span>`}</td>
+    <td data-l="Saisi par"><small>${esc(x.saisi_par || "—")}<br>${esc(x.saisi_le || "")}</small></td></tr>`).join("") || `<tr><td colspan="8" style="color:var(--ink-3)">Aucune absence pour ces filtres.</td></tr>`;
+}
+
+/* ── Historique d'un membre ── */
+let HI_MEMBERS = null;
+const chipCls = (row) => row.compte ? (row.statut === "present" ? "paye" : row.statut === "absent" ? "partiel" : row.statut === "excuse" ? "avance" : "du") : "";
+async function renderHistorique() {
+  const canAll = SESSION.perms.includes("members.view_all");
+  if (!canAll) { $("#hi-select-zone").style.display = "none"; return renderHistoriqueDe(SESSION.user.matricule); }
+  $("#hi-select-zone").style.display = "";
+  if (!HI_MEMBERS) { const rM = await SERVER.api({ endpoint: "members.list", token: SESSION.token }); if (rM.status !== 200) return; HI_MEMBERS = rM.data; $("#hi-mat").innerHTML = HI_MEMBERS.map(m => `<option value="${m.matricule}">${m.matricule} — ${esc(m.nom + " " + m.prenom)}${m.statut === "inactif" ? " (inactif)" : ""}</option>`).join(""); }
+  return renderHistoriqueDe($("#hi-mat").value);
+}
+async function renderHistoriqueDe(mat) {
+  const r = await SERVER.api({ endpoint: "member.history", token: SESSION.token, body: { matricule: mat } });
+  if (r.status !== 200) { toast("err", r.msg); return; }
+  const d = r.data;
+  $("#hi-title").textContent = "Historique — " + d.nom + " " + d.prenom;
+  const a = d.agg;
+  $("#hi-infos").innerHTML = `<dl class="dl">
+    <dt>Matricule</dt><dd><span class="mat">${d.matricule}</span> ${d.statut_membre === "inactif" ? `<span class="tag bad">Inactif</span>` : `<span class="tag ok">Actif</span>`}</dd>
+    <dt>Tribu</dt><dd>${esc(d.tribu)}</dd><dt>Adhésion</dt><dd>${esc(d.date_adhesion)}${d.date_desactivation ? " — désactivé le " + esc(d.date_desactivation) : ""}</dd>
+    <dt>Événements évaluables</dt><dd><b>${a.evaluables}</b></dd>
+    <dt>Présents / Absents / Excusés</dt><dd><b>${a.presents}</b> / ${a.absents} / ${a.excuses}${a.non_concernes ? " — " + a.non_concernes + " non concerné(s) hors évaluation" : ""}</dd>
+    <dt>Taux de présence (A1)</dt><dd><b style="color:${a.taux === null ? "var(--ink-3)" : a.taux >= 80 ? "var(--ok)" : a.taux >= 60 ? "var(--warn)" : "var(--danger)"}">${a.taux === null ? "n/a" : a.taux + " %"}</b> — les excuses sont hors calcul</dd></dl>`;
+  $("#hi-chips").innerHTML = d.rows.map(x => `<span class="mois-chip ${chipCls(x)}" style="${x.compte ? "" : "background:var(--bg-deep);color:var(--ink-2);border:1px solid var(--line)"}" title="${esc(x.titre)} — ${esc(x.raison)}${x.motif_excuse ? " — excuse : " + esc(x.motif_excuse) : ""}">${esc(x.date)} ${x.compte ? (x.statut === "present" ? "P" : x.statut === "absent" ? "A" : x.statut === "excuse" ? "E" : "NC") : "—"}</span>`).join("") || `<i style="font-size:12.5px;color:var(--ink-3)">Aucun événement au périmètre.</i>`;
+  $("#hi-tbl tbody").innerHTML = d.rows.map(x => `<tr>
+    <td data-l="Date" class="mono">${esc(x.date)}</td><td data-l="Événement"><b>${esc(x.titre)}</b></td>
+    <td data-l="Type"><span class="tag gold">${esc(x.type_label)}</span></td><td data-l="Lieu">${esc(x.lieu)}</td>
+    <td data-l="Statut">${STATUT_TAG(x.statut)}${x.motif_excuse ? `<br><small>Motif : ${esc(x.motif_excuse)}</small>` : ""}</td>
+    <td data-l="Comptabilisé">${x.compte ? `<span class="tag ok">Oui (A1)</span>` : `<span class="tag neutral">Non</span> <small style="color:var(--ink-3)">${esc(x.raison)}</small>`}</td></tr>`).join("") || `<tr><td colspan="6" style="color:var(--ink-3)">Aucun événement.</td></tr>`;
+}
+
+/* ── Statistiques + contrat classement ── */
+let CONTRAT = null;
+async function renderStats() {
+  const r = await SERVER.api({ endpoint: "stats.global", token: SESSION.token });
+  if (r.status !== 200) return;
+  const tot = r.data.tot;
+  $("#k-s-eval").textContent = tot.evalues; $("#k-s-pres").textContent = tot.presents;
+  $("#k-s-abs").textContent = tot.absents; $("#k-s-taux").textContent = tot.taux === null ? "n/a" : tot.taux + " %";
+  const tauxTag = t => t === null ? `<span class="tag neutral">n/a</span>` : `<span class="tag ${t >= 90 ? "ok" : t >= 70 ? "warn" : "bad"}">${t} %</span>`;
+  $("#st-membres-tbl tbody").innerHTML = r.data.perMember.map(m => `<tr>
+    <td data-l="Membre"><div class="cell-name"><span class="ava">${initials(m.prenom + " " + m.nom)}</span><span class="n"><b>${esc(m.nom + " " + m.prenom)}</b><small><span class="mat">${m.matricule}</span>${m.statut_membre === "inactif" ? " · inactif" : ""}</small></span></div></td>
+    <td data-l="Tribu">${esc(m.tribu)}</td>
+    <td data-l="Évaluables" class="num">${m.evaluables}</td><td data-l="Présents" class="num">${m.presents}</td>
+    <td data-l="Absents" class="num">${m.absents}</td><td data-l="Excusés" class="num">${m.absents_excuses}</td>
+    <td data-l="Non concernés" class="num">${m.non_concernes}</td><td data-l="Taux">${tauxTag(m.taux_presence)}</td>
+    <td class="act"><button class="btn ghost sm" data-hist="${m.matricule}">Historique</button></td></tr>`).join("");
+  $$("#st-membres-tbl [data-hist]").forEach(b => b.addEventListener("click", () => { showTabTab("historique"); if (SESSION.perms.includes("members.view_all")) { $("#hi-mat").value = b.dataset.hist; } renderHistoriqueDe(b.dataset.hist); }));
+  $("#st-types-tbl tbody").innerHTML = r.data.perType.map(x => `<tr><td data-l="Type"><b>${esc(x.label)}</b></td><td data-l="Terminés" class="num">${x.events}</td><td data-l="Évaluables" class="num">${x.evalues}</td><td data-l="Présents" class="num">${x.presents}</td><td data-l="Taux">${tauxTag(x.taux)}</td></tr>`).join("") || `<tr><td colspan="5" style="color:var(--ink-3)">Aucun événement terminé.</td></tr>`;
+  $("#st-mois-tbl tbody").innerHTML = r.data.perMois.map(x => `<tr><td data-l="Mois" class="mono"><b>${x.mois}</b></td><td data-l="Terminés" class="num">${x.events}</td><td data-l="Évaluables" class="num">${x.evalues}</td><td data-l="Présents" class="num">${x.presents}</td><td data-l="Taux">${tauxTag(x.taux)}</td></tr>`).join("") || `<tr><td colspan="5" style="color:var(--ink-3)">Aucun événement terminé.</td></tr>`;
+}
+async function showContrat() {
+  const r = await SERVER.api({ endpoint: "stats.ranking", token: SESSION.token });
+  if (r.status !== 200) return;
+  CONTRAT = r.data;
+  $("#st-contrat").textContent = JSON.stringify(r.data, null, 2);
+  $("#st-contrat-zone").style.display = "block";
+  toast("ok", "Projection « contrat classement » affichée — champs vérifiés par les scénarios T22-T23.");
+}
+function exportContrat() {
+  if (!CONTRAT) { toast("err", "Affichez d'abord la projection JSON."); return; }
+  const blob = new Blob([JSON.stringify(CONTRAT, null, 2)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "adl-ci_contrat_classement.json"; a.click();
+  toast("ok", "Contrat de classement exporté (JSON).");
+}
+
+/* ── Ma participation ── */
+async function renderOwn() {
+  const r = await SERVER.api({ endpoint: "member.history", token: SESSION.token, body: { matricule: SESSION.user.matricule } });
+  if (r.status !== 200) { toast("err", r.msg); return; }
+  const d = r.data, a = d.agg;
+  $("#own-infos").innerHTML = `<dl class="dl">
+    <dt>Matricule</dt><dd><span class="mat">${d.matricule}</span></dd><dt>Tribu</dt><dd>${esc(d.tribu)}</dd>
+    <dt>Événements évaluables</dt><dd><b>${a.evaluables}</b></dd>
+    <dt>Présents / Absents / Excusés</dt><dd><b>${a.presents}</b> / ${a.absents} / ${a.excuses}${a.non_concernes ? " — " + a.non_concernes + " non concerné(s) hors évaluation" : ""}</dd>
+    <dt>Mon taux de présence (A1)</dt><dd><b style="color:${a.taux === null ? "var(--ink-3)" : a.taux >= 80 ? "var(--ok)" : "var(--warn)"}">${a.taux === null ? "n/a" : a.taux + " %"}</b></dd></dl>`;
+  $("#own-chips").innerHTML = d.rows.map(x => `<span class="mois-chip ${chipCls(x)}" style="${x.compte ? "" : "background:var(--bg-deep);color:var(--ink-2);border:1px solid var(--line)"}" title="${esc(x.titre)} — ${esc(x.raison)}">${esc(x.date)} ${x.compte ? (x.statut === "present" ? "P" : x.statut === "absent" ? "A" : x.statut === "excuse" ? "E" : "NC") : "—"}</span>`).join("") || `<i style="font-size:12.5px;color:var(--ink-3)">Aucun événement au périmètre.</i>`;
+  $("#own-tbl tbody").innerHTML = d.rows.map(x => `<tr>
+    <td data-l="Date" class="mono">${esc(x.date)}</td><td data-l="Événement"><b>${esc(x.titre)}</b></td>
+    <td data-l="Type"><span class="tag gold">${esc(x.type_label)}</span></td><td data-l="Mon statut">${STATUT_TAG(x.statut)}${x.motif_excuse ? `<br><small>Motif : ${esc(x.motif_excuse)}</small>` : ""}</td>
+    <td data-l="Comptabilisé">${x.compte ? `<span class="tag ok">Oui</span>` : `<span class="tag neutral">Non</span> <small style="color:var(--ink-3)">${esc(x.raison)}</small>`}</td></tr>`).join("") || `<tr><td colspan="5" style="color:var(--ink-3)">Aucun événement.</td></tr>`;
+}
+
+/* ── Banc, intrusion, archi ── */
+function renderBench(out, pass, total, ms) {
+  $("#bs-total").textContent = total; $("#bs-pass").textContent = pass; $("#bs-fail").textContent = total - pass; $("#bs-time").textContent = ms + " ms";
+  const GROUPS = { 1: "G1 — Création d'événements : types, date, lieu, périmètre (A2, A6)", 2: "G2 — Feuilles de présence : 4 statuts, unicité, clôture (A4, A5)", 3: "G3 — Absences, excuses et historiques par membre", 4: "G4 — Corrections historisées, annulation, traçabilité", 5: "G5 — Statistiques, exclusions et contrat du classement futur" };
+  let html = "";
+  for (const g of [1, 2, 3, 4, 5]) {
+    html += `<div class="grp-h">${GROUPS[g]}</div>`;
+    for (const sc of out.filter(x => x.g === g)) {
+      html += `<details class="sc"><summary><span class="verdict ${sc.pass ? "p" : "f"}">${sc.pass ? "✓ PASS" : "✗ ÉCART"}</span><b>${sc.id} · ${esc(sc.titre)}</b></summary>
+        <div class="body"><b>Attendu :</b> ${esc(sc.attendu)}<br><b>Obtenu :</b> ${esc(sc.obtenu)}${sc.detail ? `<br>${esc(sc.detail)}` : ""}</div></details>`;
+    }
+  }
+  html += `<div class="note ${pass === total ? "ok" : "err"}" style="margin-top:14px"><span>${pass === total ? "✓" : "⚠️"}</span><span><b>${pass === total ? "Suite complète conforme : " + pass + "/" + total + " scénarios — chaque calcul a été confronté à un recalcul indépendant depuis les listes brutes." : pass + "/" + total + " scénarios conformes — examinez les écarts."}</b> Les données fictives ont été réinitialisées après l'exécution.</span></div>`;
+  $("#bench-results").innerHTML = html;
+}
+function renderAttacks() {
+  $("#attacks").innerHTML = ATTACKS.map((a, i) => `<div class="attack"><div class="desc"><b>${i + 1} · ${esc(a.t)}</b><small>${esc(a.d)}</small></div><button class="btn danger sm" data-atk="${i}">Lancer l'attaque</button></div>`).join("");
+  $$("#attacks [data-atk]").forEach(b => b.addEventListener("click", async () => {
+    const a = ATTACKS[+b.dataset.atk];
+    const r = await a.run();
+    const cls = r.status >= 500 ? "g" : r.status >= 400 ? "r" : "k";
+    $("#console-out").innerHTML += `\n\n<span class="g">» ${esc(a.t)}</span>\n<span class="${cls}">HTTP ${r.status} · ${esc(r.code)}</span>\n<span class="k">Serveur :</span> ${esc(r.msg)}${r.auditId ? `\n<span class="g">Journal :</span> entrée n° ${r.auditId}` : ""}`;
+    $("#console-out").scrollTop = 1e9;
+    toast(r.status >= 400 ? "ok" : "warn", r.status >= 400 ? `Refus du serveur (HTTP ${r.status}) — journal n° ${r.auditId}.` : `Réponse reçue (HTTP ${r.status}).`);
+  }));
+}
+function renderArchi() {
+  const REGLES = [
+    ["Fonctionnalité 1-2", "Créer une réunion ou une activité parmi les 6 types imposés", "Formulaire unique en deux étapes (saisie → résumé à confirmer) ; titre généré par défaut si absent"],
+    ["Fonctionnalité 3", "Enregistrer la date et le lieu", "Champs obligatoires validés côté serveur (422 si absents)"],
+    ["Fonctionnalité 4 · A2", "Définir les membres concernés ou invités", "Liste dédoublonnée à la création ; réunion ordinaire et AG : tous les actifs pré-marqués (ajustable) ; 4 autres types : sélection manuelle obligatoire"],
+    ["Fonctionnalité 5", "Enregistrer les présences", "Feuille par événement avec les 4 statuts ; saisie atomique réservée au secrétaire général et à l'administrateur (A3) ; saisie impossible avant le jour de l'événement"],
+    ["Fonctionnalité 6-7 · A4", "Consulter les absences ; identifier les absences justifiées", "Registre filtrable ; statut « absent excusé » distinct avec motif obligatoire et justificatif facultatif tracés"],
+    ["Fonctionnalité 8", "Consulter l'historique des participations", "Chronologie par membre avec agrégats serveur ; chaque événement non comptabilisé porte sa raison"],
+    ["Fonctionnalité 9", "Produire des statistiques", "Par membre, par type, par mois ; taux = présents ÷ (présents + absents) ; confrontées au recalcul indépendant (T20)"],
+    ["Règle : unicité", "Une seule présence par membre et par événement", "Une participation par paire (événement, membre) ; modification directe refusée → correction historisée obligatoire"],
+    ["Règle · A1", "Une absence excusée ne pénalise pas le score d'engagement", "L'excusé est exclu du numérateur et du dénominateur (ni négatif ni positif) ; jamais fusionné avec « absent » (démontré en T21)"],
+    ["Règle · A2", "Un membre n'est évalué que pour les événements le concernant", "Seules les participations évaluables des événements terminés où il était concerné entrent dans ses agrégats ; le champ sources rend le périmètre auditable"],
+    ["Règle", "Les corrections sont historisées", "Journal des corrections append-only : qui, quand, champ, ancien → nouveau, motif ≥ 10 caractères ; aucune suppression (endpoints inexistants, T19)"],
+    ["A5", "Cycle de vie : planifié → terminé ; annulation tracée", "Clôture refusée tant que la feuille est incomplète (choix) et pour un événement futur ; annulation avec motif ; annulés exclus des statistiques et de l'évaluation (T18, T22)"],
+    ["A6 · V11.1", "Les réunions ordinaires se tiennent chaque 15 du mois", "Générateur qui préremplit type, date du 15, titre, lieu par défaut et actifs — articulation avec le module financier (séance de règlement)"],
+    ["Demande du bureau", "Des informations utilisables par le futur système de classement", "Projection « contrat classement » (stats.ranking) : compteurs par statut, taux A1, périmètre explicite, formule embarquée — intégrité vérifiée en T23"]
+  ];
+  $("#regles-body").innerHTML = REGLES.map(x => `<tr><td data-l="Réf."><b>${esc(x[0])}</b></td><td data-l="Règle">${esc(x[1])}</td><td data-l="Implémentation">${esc(x[2])}</td></tr>`).join("");
+  const CHOIX = [
+    ["1", "Le comportement en cas de feuille incomplète n'était pas précisé", "Clôture refusée tant qu'un membre concerné n'a pas de statut — garantit des données complètes pour le classement"],
+    ["2", "La modification directe d'une présence déjà saisie n'était pas précisée", "Refusée : elle passe systématiquement par la correction historisée (ancien → nouveau + motif)"],
+    ["3", "L'étendue exacte de la consultation des membres ordinaires (A3 « ouverte à tous »)", "Les membres consultent les événements, le registre des absences, les statistiques et tous les historiques"],
+    ["4", "Le titre des événements n'était pas exigé", "Facultatif : généré par défaut (type + date) ; le lieu et la date restent obligatoires"],
+    ["5", "La présence d'un membre inactif dans le périmètre n'était pas précisée", "Possible par sélection manuelle (invitation) — il n'est jamais pré-marqué automatiquement (A2)"]
+  ];
+  $("#choix-body").innerHTML = CHOIX.map(x => `<tr><td data-l="#"><b>${x[0]}</b></td><td data-l="Point non précisé">${esc(x[1])}</td><td data-l="Choix implémenté (réversible)">${esc(x[2])}</td></tr>`).join("");
+  const MAP = [
+    ["Feuilles de présence atomiques (4 statuts)", "Routes REST /events/:id/participations ; validation serveur ; saisie en lot transactionnelle", "Aucune écriture directe en base"],
+    ["Une seule présence par membre et par événement", "Contrainte UNIQUE(event_id, matricule) sur la table participations", "UNIQUE NOT NULL"],
+    ["Journal des corrections append-only", "Table corrections INSERT-only + déclencheur anti-UPDATE/DELETE", "REVOKE UPDATE/DELETE"],
+    ["Périmètre A2 (concernés)", "Table event_scope versionnée ; évaluation jointe au périmètre", "Aucun calcul hors périmètre"],
+    ["Permissions par appel (A3)", "Middleware requirePerm() sur chaque route", "Aucune route sans middleware"],
+    ["Contrat du classement (stats.ranking)", "Vue SQL matérialisée recalculée à chaque correction", "Aucun score saisi à la main"],
+    ["Journal d'audit chaîné SHA-256", "Table audit append-only + export mensuel hors système", "REVOKE UPDATE/DELETE sur audit_log"]
+  ];
+  $("#map-body").innerHTML = MAP.map(x => `<tr><td data-l="Prototype">${esc(x[0])}</td><td data-l="Production">${esc(x[1])}</td><td data-l="Verrou">${esc(x[2])}</td></tr>`).join("");
+  const FLAWS = [
+    ["1", "Le « serveur » vit dans le navigateur : la séparation client-serveur est une simulation fidèle mais non opposable hors du navigateur.", "Serveur distant Node.js + Express (AT-1) ; le prototype reste la spécification de référence."],
+    ["2", "La feuille se saisit après la réunion : entre la tenue et la saisie, la feuille papier reste la référence.", "Saisie le jour même recommandée (formation 6b) ; la clôture bloque tant que la feuille est incomplète."],
+    ["3", "Les justificatifs d'excuse sont des références texte (pas de stockage de fichiers dans le prototype).", "En production : photo au téléphone vers un stockage de fichiers avec contrôle d'accès."],
+    ["4", "Aucune invitation ni notification (courriel, SMS) : le module enregistre, il ne convoque pas.", "V2 : notifications optionnelles ; la convocation reste un canal humain ( WhatsApp, appel)."],
+    ["5", "Le registre des membres est embarqué dans le prototype ; en production il est partagé avec le module membres validé (pièce 6f).", "Base PostgreSQL unique ; le statut actif/inactif et les matricules proviennent du module membres."],
+    ["6", "Le lien présence ↔ cotisation n'est pas automatisé : la réunion du 15 sert au règlement (V11.1) mais chaque module reste séparé.", "Intégration v2 : rapprochement « présents du 15 / cotisations encaissées » offert au trésorier."]
+  ];
+  $("#flaws-body").innerHTML = FLAWS.map(x => `<tr><td data-l="#">${x[0]}</td><td data-l="Constat">${esc(x[1])}</td><td data-l="Traitement">${esc(x[2])}</td></tr>`).join("");
+}
+
+/* ── Connexion / déconnexion ── */
+function lgErr(msg) { $("#lg-err-txt").textContent = msg; $("#lg-err").classList.add("on"); }
+$("#login-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("#lg-err").classList.remove("on");
+  const u = $("#lg-user").value.trim(), p = $("#lg-pass").value;
+  if (!u) { $("#f-lg-user").classList.add("err"); return; }
+  if (!p) { $("#f-lg-pass").classList.add("err"); return; }
+  const b = $("#lg-submit"); b.classList.add("busy"); b.disabled = true;
+  const r = await SERVER.api({ endpoint: "auth.login", body: { user: u, pass: p } });
+  b.classList.remove("busy"); b.disabled = false;
+  if (r.status !== 200) { lgErr(r.msg); return; }
+  SESSION = { token: r.data.token, user: r.data.user, perms: r.data.perms };
+  $("#top-who").style.display = "flex";
+  $("#top-name").textContent = SESSION.user.nom; $("#top-role").textContent = SESSION.user.roleLabel; $("#top-ava").textContent = initials(SESSION.user.nom);
+  $("#v-login").classList.remove("on"); $("#v-appzone").style.display = "block";
+  $("#lg-pass").value = "";
+  EV = { rows: [], members: [], tot: null }; AB_MEMBERS = null; HI_MEMBERS = null; CONTRAT = null;
+  buildNav();
+  toast("ok", r.msg);
+});
+async function doLogout(expired, silent) {
+  if (SESSION.token && !expired) await SERVER.api({ endpoint: "auth.logout", token: SESSION.token });
+  SESSION = { token: null, user: null, perms: [] };
+  $("#top-who").style.display = "none"; $("#v-appzone").style.display = "none"; $("#v-login").classList.add("on");
+  buildNav();
+  if (!silent) toast("info", expired ? "Votre session a expiré — reconnectez-vous." : "Session fermée. À bientôt !");
+}
+$("#btn-logout").addEventListener("click", () => doLogout(false));
+$("#btn-create-open").addEventListener("click", () => { $("#panel-create").style.display = "block"; $("#btn-create-open").style.display = "none"; });
+$("#btn-create-close").addEventListener("click", () => { $("#panel-create").style.display = "none"; $("#btn-create-open").style.display = ""; });
+$("#btn-gen").addEventListener("click", prefillGen);
+$("#ev-type").addEventListener("change", preMarquerActifs);
+$("#btn-ev-preview").addEventListener("click", previewCreate);
+$("#btn-ev-confirm").addEventListener("click", confirmCreate);
+$("#ev-q").addEventListener("input", () => { clearTimeout(window.__ft); window.__ft = setTimeout(drawEventsTable, 300); });
+$("#ev-ftype").addEventListener("change", drawEventsTable);
+$("#ev-fstatut").addEventListener("change", drawEventsTable);
+$("#btn-feuille-back").addEventListener("click", () => showTabTab(FEUILLE_BACK));
+$("#btn-feuille-save").addEventListener("click", saveFeuille);
+$("#btn-feuille-allp").addEventListener("click", allPresent);
+$("#btn-feuille-closeev").addEventListener("click", closeEv);
+$("#btn-feuille-cancel").addEventListener("click", cancelEv);
+$("#btn-corr-apply").addEventListener("click", applyCorr);
+$("#btn-corr-cancel").addEventListener("click", () => { $("#panel-corr").style.display = "none"; CORR = null; });
+$("#corr-statut").addEventListener("change", toggleCorrExc);
+$("#ab-mat").addEventListener("change", renderAbsences);
+$("#ab-just").addEventListener("change", renderAbsences);
+$("#hi-mat").addEventListener("change", () => renderHistoriqueDe($("#hi-mat").value));
+$("#btn-contrat").addEventListener("click", showContrat);
+$("#btn-contrat-export").addEventListener("click", exportContrat);
+$("#btn-bench-run").addEventListener("click", () => { $("#bench-results").innerHTML = `<div class="note info"><span>⏳</span><span>Suite en cours — quelques secondes (dérivations PBKDF2 et recalculs inclus)…</span></div>`; setTimeout(runBench, 50); });
+$("#btn-bench-export").addEventListener("click", () => {
+  if (!BENCH_RESULTS) { toast("err", "Lancez d'abord la suite de tests."); return; }
+  const blob = new Blob([JSON.stringify(BENCH_RESULTS, null, 2)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "adl-ci_tests_reunions_activites_v1.json"; a.click();
+});
+$("#btn-console-clear").addEventListener("click", () => { $("#console-out").textContent = "Console effacée."; });
+
+/* ── Amorçage ── */
+(async () => {
+  await SERVER.seed();
+  buildNav();
+  showTab("login");
+  renderAttacks(); renderArchi();
+})();
+</script>
+
+</body>
+</html>

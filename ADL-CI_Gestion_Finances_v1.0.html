@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADL-CI GESTION — Module financier v1.0</title>
+<!--
+  ADL-CI GESTION — Module financier v1.0 (cotisations)
+  Association pour le Développement de Laabha — Section Côte d'Ivoire
+  Prototype autonome (suite des pièces 6e et 6f : même serveur simulé, mêmes garanties).
+  Fonctionnalités : encaissement de cotisations référencé au matricule, situation
+  individuelle, journal financier filtrable, contre-passation tracée (aucune suppression),
+  recouvrements par tribu, synthèse mensuelle, export.
+  Règles : chaque écriture référence un matricule existant ; un mois ne se paie qu'une fois ;
+  les écritures sont immuables ; les corrections se font par écriture inverse avec motif ;
+  les obligations déjà enregistrées ne s'effacent pas ; les cotisations d'un membre inactif
+  restent dues.
+  Montant mensuel : 1 000 FCFA (valeur fictive de démonstration, configurable en production).
+  Production visée (AT-1) : Node.js + Express / PostgreSQL / IndexedDB (Dexie).
+-->
+<style>
+:root{
+  --bg:#F6F3EC; --bg-soft:#EFEAE0; --bg-deep:#E7E1D3;
+  --primary:#2A4A3A; --primary-deep:#1D362B; --primary-soft:#3D6B54;
+  --accent:#C89F62; --accent-soft:#E9DBBE; --accent-faint:#F3ECD9;
+  --ink:#1C1B18; --ink-2:#4A473F; --ink-3:#7A7466;
+  --card:#FFFFFF; --line:#DCD5C6; --line-soft:#E8E2D4;
+  --ok:#2F7D4F; --ok-bg:#E6F1E9; --warn:#B97E1C; --warn-bg:#F7EEDC;
+  --danger:#A63D2F; --danger-bg:#F5E5E1; --info:#3E6C8E; --info-bg:#E4EDF3;
+  --shadow:0 1px 2px rgba(28,27,24,.06),0 4px 14px rgba(28,27,24,.08);
+  --shadow-lg:0 8px 30px rgba(28,27,24,.16);
+  --r:14px;
+  --f-title:'Lora',Georgia,serif; --f-ui:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --f-num:'IBM Plex Mono',ui-monospace,monospace;
+  --touch:44px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--f-ui);font-size:15px;line-height:1.55;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+button{font:inherit;cursor:pointer}
+input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3,h4{font-family:var(--f-title);font-weight:600;line-height:1.25;color:var(--primary)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px;border-radius:4px}
+.wrap{max-width:1180px;margin:0 auto;padding:22px 26px 80px}
+
+/* En-tête */
+.top{position:sticky;top:0;z-index:50;background:var(--primary);color:#fff;padding:12px 26px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.top .logo{display:flex;align-items:center;gap:11px}
+.top .logo img{width:38px;height:38px}
+.top b{font-family:var(--f-title);font-size:17px;letter-spacing:.04em;display:block}
+.top small{font-size:10.5px;color:rgba(255,255,255,.65);letter-spacing:.08em;text-transform:uppercase;display:block}
+.top .who{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:13px}
+.top .who .ava{width:36px;height:36px;border-radius:50%;background:var(--accent);color:var(--primary-deep);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
+.top .who b{font-size:13.5px;font-family:var(--f-ui)}
+.top .who small{font-size:10px;text-transform:none;letter-spacing:0;color:var(--accent)}
+.topnav{background:var(--primary-deep);padding:0 14px;display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.topnav button{flex-shrink:0;background:none;border:none;color:rgba(255,255,255,.78);padding:12px 15px;font-size:13.5px;font-weight:600;border-bottom:3px solid transparent;min-height:var(--touch)}
+.topnav button.on{color:#fff;border-bottom-color:var(--accent)}
+.topnav button:hover{color:#fff}
+.tab{display:none}
+.tab.on{display:block;animation:fadein .25s ease}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* Composants */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:var(--touch);padding:0 17px;border-radius:11px;border:1px solid transparent;font-weight:600;font-size:14px;transition:background .15s}
+.btn.pri{background:var(--primary);color:#fff}.btn.pri:hover{background:var(--primary-deep)}
+.btn.gold{background:var(--accent);color:var(--primary-deep)}.btn.gold:hover{background:#B9905A}
+.btn.ghost{background:#fff;color:var(--primary);border-color:var(--line)}.btn.ghost:hover{background:var(--bg-soft)}
+.btn.danger{background:var(--danger);color:#fff}.btn.danger:hover{background:#8F3226}
+.btn.sm{min-height:36px;padding:0 12px;font-size:12.5px;border-radius:9px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.card .card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 20px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+.card .card-h h2{font-size:16.5px}
+.card .card-b{padding:18px 20px}
+.card .card-b.tight{padding:0}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}
+.note{display:flex;gap:11px;padding:13px 15px;border-radius:12px;font-size:13.5px;border:1px solid;align-items:flex-start}
+.note b{display:block;margin-bottom:2px}
+.note.ok{background:var(--ok-bg);border-color:#CBE3D2;color:#275E3D}
+.note.warn{background:var(--warn-bg);border-color:#EBD9B4;color:#7A5314}
+.note.err{background:var(--danger-bg);border-color:#E7C7BF;color:#7E2E22}
+.note.info{background:var(--info-bg);border-color:#C9DBE7;color:#2C4E66}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap}
+.tag.ok{background:var(--ok-bg);color:var(--ok)}
+.tag.warn{background:var(--warn-bg);color:var(--warn)}
+.tag.bad{background:var(--danger-bg);color:var(--danger)}
+.tag.info{background:var(--info-bg);color:var(--info)}
+.tag.neutral{background:var(--bg-deep);color:var(--ink-2)}
+.tag.gold{background:var(--accent-soft);color:#7A5A2B}
+.field{margin-bottom:13px}
+.field label{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:6px}
+.field input,.field select,.field textarea{width:100%;min-height:var(--touch);border:1px solid var(--line);border-radius:10px;padding:10px 13px;background:#fff;font-size:14.5px}
+.field .help{font-size:12px;color:var(--ink-3);margin-top:5px}
+.field.err input,.field.err select{border-color:var(--danger);background:var(--danger-bg)}
+.field .errmsg{font-size:12.5px;color:var(--danger);margin-top:5px;display:none}
+.field.err .errmsg{display:block}
+.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table.tbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:560px}
+.tbl th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);font-weight:700;padding:10px 13px;border-bottom:1px solid var(--line);background:var(--bg-soft);white-space:nowrap}
+.tbl td{padding:10px 13px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl .num{font-family:var(--f-num);text-align:right;white-space:nowrap}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chips .btn.on{background:var(--primary);color:#fff;border-color:var(--primary)}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px 18px}
+.kpi .lab{font-size:12px;color:var(--ink-3);font-weight:600}
+.kpi .val{font-family:var(--f-num);font-size:25px;font-weight:600;color:var(--primary);margin-top:5px;font-variant-numeric:tabular-nums}
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.ava{width:38px;height:38px;border-radius:50%;background:var(--accent-soft);color:#7A5A2B;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0}
+.cell-name{display:flex;align-items:center;gap:11px;min-width:0}
+.cell-name .n b{display:block;font-size:13.5px;white-space:nowrap}
+.cell-name .n small{color:var(--ink-3);font-size:11.5px}
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:22px 0 16px}
+.head h1{font-size:25px}
+.head .sub{color:var(--ink-3);font-size:13.5px;margin-top:3px;max-width:760px}
+.searchbar{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+.searchbar .field{margin:0;flex:1;min-width:160px}
+.mat{font-family:var(--f-num);font-size:12px;background:var(--accent-faint);border:1px solid var(--accent-soft);border-radius:7px;padding:2px 8px;color:#7A5A2B;white-space:nowrap}
+.dl{display:grid;grid-template-columns:auto 1fr;gap:7px 16px;font-size:13.5px}
+.dl dt{color:var(--ink-3);white-space:nowrap}
+.dl dd{min-width:0;word-break:break-word}
+.mois-chip{display:inline-block;font-family:var(--f-num);font-size:11.5px;border-radius:7px;padding:2px 8px;margin:2px 3px 2px 0}
+.mois-chip.du{background:var(--warn-bg);color:var(--warn);border:1px solid #EBD9B4}
+.mois-chip.paye{background:var(--ok-bg);color:var(--ok);border:1px solid #CBE3D2}
+.console{background:#152420;color:#D8E6DD;border-radius:12px;padding:14px 16px;font-family:var(--f-num);font-size:12.5px;line-height:1.6;overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+.console .k{color:#8FD0A9}.console .r{color:#F0A392}.console .g{color:#E9C88F}
+.attack{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+.attack:last-child{border-bottom:none}
+.attack .desc{flex:1;min-width:220px}
+.attack .desc b{display:block;font-size:13.5px}
+.attack .desc small{color:var(--ink-3);font-size:12px}
+.bench-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.verdict{font-weight:700;font-family:var(--f-num);font-size:12.5px}
+.verdict.p{color:var(--ok)}.verdict.f{color:var(--danger)}
+details.sc{border:1px solid var(--line-soft);border-radius:10px;margin:0 0 8px;background:#fff}
+details.sc summary{list-style:none;display:flex;gap:10px;align-items:center;padding:10px 14px;font-size:13px;cursor:pointer;flex-wrap:wrap}
+details.sc summary::-webkit-details-marker{display:none}
+details.sc .body{padding:10px 14px;border-top:1px solid var(--line-soft);font-size:12.5px;color:var(--ink-2);background:var(--bg-soft);border-radius:0 0 10px 10px}
+.grp-h{font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-weight:700;margin:18px 0 10px}
+#toasts{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:150;display:flex;flex-direction:column;gap:8px;width:min(480px,calc(100vw - 24px))}
+.toast{background:var(--primary-deep);color:#fff;border-radius:12px;padding:12px 16px;font-size:13.5px;box-shadow:var(--shadow-lg);animation:fadein .25s}
+.toast.err{background:#843023}.toast.ok{background:#245C3B}
+.login-err{display:none;background:var(--danger-bg);border:1px solid #E7C7BF;color:#7E2E22;border-radius:10px;padding:11px 14px;font-size:13px;margin-bottom:14px}
+.login-err.on{display:flex;gap:9px;align-items:flex-start}
+.spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:rot .7s linear infinite;display:none}
+@keyframes rot{to{transform:rotate(360deg)}}
+.btn.busy .spin{display:inline-block}
+.creds{background:var(--accent-faint);border:1px solid var(--accent-soft);border-radius:11px;padding:11px 14px;font-size:12.5px;margin-top:15px}
+.creds code{font-family:var(--f-num);font-size:11.5px;background:#fff;border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+.creds .row{display:flex;justify-content:space-between;gap:8px;padding:3px 0;flex-wrap:wrap}
+
+/* Connexion */
+#v-login{max-width:none;padding:0}
+.login-wrap{min-height:calc(100vh - 120px);display:grid;grid-template-columns:minmax(330px,42%) 1fr}
+.login-hero{background:var(--primary);color:#fff;padding:44px 40px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden}
+.login-hero::after{content:"";position:absolute;right:-70px;bottom:-70px;width:250px;height:250px;border-radius:50%;border:32px solid rgba(200,159,98,.16)}
+.login-hero h1{color:#fff;font-size:27px;margin:8px 0}
+.login-hero p{color:rgba(255,255,255,.8);font-size:14px;max-width:420px}
+.login-hero ul{list-style:none;display:grid;gap:11px;margin-top:20px}
+.login-hero li{display:flex;gap:10px;font-size:13.5px;color:rgba(255,255,255,.86)}
+.login-hero li b{color:var(--accent)}
+.login-hero .foot{font-size:11.5px;color:rgba(255,255,255,.55);position:relative;z-index:1}
+.login-form{display:flex;align-items:center;justify-content:center;padding:30px 20px;background:var(--bg)}
+.login-card{width:100%;max-width:410px}
+.login-card h2{font-size:21px;margin-bottom:4px}
+
+@media(max-width:900px){.g2,.g3,.kpi-row,.bench-summary{grid-template-columns:1fr 1fr}.login-wrap{grid-template-columns:1fr}.login-hero{padding:30px 24px}.login-hero ul{display:none}.wrap{padding:16px 14px 70px}.top{padding:10px 14px}}
+@media(max-width:640px){.g2,.g3,.kpi-row,.bench-summary{grid-template-columns:1fr}.tbl-wrap{overflow:visible}table.tbl{min-width:0;border:none}.tbl thead{display:none}.tbl tr{display:block;background:#fff;border:1px solid var(--line);border-radius:12px;margin:0 0 10px;padding:6px 4px;box-shadow:var(--shadow)}.tbl td{display:flex;justify-content:space-between;align-items:center;gap:12px;border:none;padding:8px 12px}.tbl td::before{content:attr(data-l);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);flex-shrink:0}.tbl td.num{text-align:right}.tbl td.act{justify-content:flex-end}.tbl td.act::before{display:none}.tag{white-space:normal}.dl{grid-template-columns:1fr}.dl dt{margin-top:6px}.dl dd{margin-left:12px}.kpi-row{display:grid;grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="logo"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Ccircle cx='24' cy='24' r='21' fill='%23FFFFFF'/%3E%3Cpath d='M24 10l4.2 8.6 9.5 1.4-6.9 6.7 1.6 9.4L24 31.6l-8.4 4.5 1.6-9.4-6.9-6.7 9.5-1.4z' fill='%232A4A3A'/%3E%3C/svg%3E" alt="">
+  <span><b>ADL-CI GESTION</b><small>Module financier — Cotisations</small></span></div>
+  <div class="who" id="top-who" style="display:none">
+    <span class="ava" id="top-ava">–</span>
+    <span><b id="top-name">–</b><small id="top-role">–</small></span>
+    <button class="btn gold sm" id="btn-logout">Déconnexion</button>
+  </div>
+</header>
+<nav class="topnav" id="topnav" aria-label="Sections"></nav>
+
+<!-- ============ CONNEXION ============ -->
+<div class="tab" id="v-login">
+  <div class="login-wrap">
+    <div class="login-hero">
+      <div>
+        <h1>Cotisations et recettes</h1>
+        <p>Chaque écriture financière référence le matricule d'un membre du registre — jamais un nom saisi à la main. Les écritures sont immuables : toute correction se fait par écriture inverse tracée avec son motif.</p>
+        <ul>
+          <li><b>Référence</b> obligatoire au matricule : le serveur refuse tout paiement sans fiche existante.</li>
+          <li><b>Un mois, un paiement</b> : payer deux fois le même mois est refusé (409).</li>
+          <li><b>Aucune suppression</b> : la contre-passation crée une écriture inverse — l'écriture d'origine reste visible.</li>
+          <li><b>Obligations conservées</b> : les cotisations d'un membre inactif restent dues et visibles.</li>
+        </ul>
+      </div>
+      <div class="foot">Prototype v1.0 · Production visée : Node.js + Express / PostgreSQL (AT-1) · Montant mensuel fictif de démonstration : 1 000 FCFA · Navigateur moderne requis.</div>
+    </div>
+    <div class="login-form">
+      <div class="login-card">
+        <h2>Connexion</h2>
+        <p style="font-size:13.5px;color:var(--ink-3);margin-bottom:16px">Le trésorier encaisse et contre-passe ; le bureau consulte selon son périmètre ; chaque membre voit sa situation.</p>
+        <div id="lg-err" class="login-err" role="alert"><span>⚠️</span><span id="lg-err-txt"></span></div>
+        <form id="login-form" novalidate>
+          <div class="field" id="f-lg-user"><label for="lg-user">Identifiant <span style="color:var(--danger)">*</span></label>
+            <input id="lg-user" type="text" autocomplete="username" placeholder="Ex. : a.traore"><p class="errmsg">Saisissez votre identifiant.</p></div>
+          <div class="field" id="f-lg-pass"><label for="lg-pass">Mot de passe <span style="color:var(--danger)">*</span></label>
+            <input id="lg-pass" type="password" autocomplete="current-password" placeholder="Votre mot de passe"><p class="errmsg">Saisissez votre mot de passe.</p></div>
+          <button class="btn pri" id="lg-submit" type="submit" style="width:100%">Se connecter <span class="spin"></span></button>
+        </form>
+        <div class="creds">
+          <b style="display:block;margin-bottom:5px">Comptes de démonstration (retirés en production)</b>
+          <div class="row"><span>Trésorier (encaisse et corrige)</span><code>a.traore / Tresor-2026!CI</code></div>
+          <div class="row"><span>Administrateur (supervision)</span><code>s.diallo / Admin-2026!CI</code></div>
+          <div class="row"><span>Président (supervision)</span><code>m.kante / President-2026!</code></div>
+          <div class="row"><span>Secrétaire général (lecture)</span><code>f.cisse / Secretariat-2026!</code></div>
+          <div class="row"><span>Membre du bureau (lecture)</span><code>n.aka / Bureau-2026!CI</code></div>
+          <div class="row"><span>Membre ordinaire (sa situation)</span><code>k.yao / Membre-2026!CI</code></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap" id="v-appzone" style="display:none">
+  <!-- ============ COTISATIONS ============ -->
+  <div class="tab" id="v-cotis">
+    <div class="head"><div><h1>Cotisations et recouvrements</h1><p class="sub" id="cotis-sub">Les mois dus sont calculés par le serveur depuis le journal des écritures : de la date d'adhésion au mois courant, moins les mois réglés. Les cotisations d'un membre inactif restent dues.</p></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap" id="cotis-actions">
+        <button class="btn ghost" id="btn-export-fin">Exporter (tableur)</button>
+        <button class="btn pri" id="btn-pay-open">+ Encaisser une cotisation</button>
+      </div></div>
+    <div id="panel-pay" style="display:none;margin-bottom:16px">
+      <div class="card"><div class="card-h"><h2>Encaisser une cotisation</h2><button class="btn ghost sm" id="btn-pay-close">Fermer</button></div>
+        <div class="card-b"><div class="grid g2">
+          <div>
+            <div class="field" id="f-pay-mat"><label for="pay-mat">Membre (matricule) <span style="color:var(--danger)">*</span></label><select id="pay-mat"></select><p class="errmsg">Choisissez un membre du registre.</p></div>
+            <div class="field" id="f-pay-mois"><label for="pay-mois">Mois concerné <span style="color:var(--danger)">*</span></label><input id="pay-mois" type="month" min="2025-01" max="2026-11" value="2026-11"><p class="help">Du mois d'adhésion au mois courant ; un mois déjà réglé est refusé.</p><p class="errmsg">Mois invalide ou hors période.</p></div>
+          </div>
+          <div>
+            <div class="field" id="f-pay-montant"><label for="pay-montant">Montant (FCFA) <span style="color:var(--danger)">*</span></label><input id="pay-montant" type="number" min="1" step="1" value="1000"><p class="errmsg">Montant invalide : entier strictement positif attendu.</p></div>
+            <div class="field" id="f-pay-mode"><label for="pay-mode">Mode de paiement <span style="color:var(--danger)">*</span></label><select id="pay-mode"><option>Espèces</option><option>Mobile money</option><option>Virement</option></select></div>
+            <button class="btn pri" id="btn-pay-submit" style="width:100%">Enregistrer l'encaissement</button>
+            <div id="pay-result" style="margin-top:10px"></div>
+          </div>
+        </div></div></div>
+    </div>
+    <div class="kpi-row">
+      <div class="kpi gold"><span class="lab">Mois dus (registre entier)</span><div class="val" id="k-dus">–</div></div>
+      <div class="kpi"><span class="lab">Encaissé mois courant</span><div class="val" id="k-enc">–</div></div>
+      <div class="kpi"><span class="lab">Taux de recouvrement</span><div class="val" id="k-taux">–</div></div>
+      <div class="kpi"><span class="lab">Écritures 2026</span><div class="val" id="k-ecrit">–</div></div>
+    </div>
+    <div class="searchbar">
+      <div class="field" style="max-width:260px"><label for="fin-q">Filtrer (nom, matricule)</label><input id="fin-q" type="search" placeholder="Ex. : Sanogo, ADLCI-2025-0002"></div>
+      <div class="field" style="max-width:220px"><label for="fin-tribu">Tribu</label><select id="fin-tribu"><option value="">Toutes les tribus</option></select></div>
+      <div class="field" style="max-width:200px"><label for="fin-dus">Situation</label><select id="fin-dus"><option value="">Tous</option><option value="dus">Avec mois dus</option><option value="ajour">À jour</option></select></div>
+    </div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="cotis-tbl">
+      <thead><tr><th>Membre</th><th>Matricule</th><th>Tribu</th><th>Statut</th><th>Mois dus</th><th>Total réglé</th><th></th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ SITUATION D'UN MEMBRE ============ -->
+  <div class="tab" id="v-situation">
+    <div class="head"><div><h1 id="sit-title">Situation</h1><p class="sub" id="sit-sub">Calcul serveur : obligations depuis la date d'adhésion, mois réglés au journal, contre-passations déduites.</p></div>
+      <button class="btn ghost" id="btn-sit-back">← Retour</button></div>
+    <div class="grid g2">
+      <div class="card"><div class="card-h"><h2>Situation de cotisation</h2></div><div class="card-b" id="sit-infos"></div></div>
+      <div class="card"><div class="card-h"><h2>Mois du registre</h2><span class="tag neutral" id="sit-chips-label">vert = réglé · ambre = dû</span></div><div class="card-b" id="sit-mois"></div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="card-h"><h2>Écritures de ce membre</h2></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="sit-tbl">
+      <thead><tr><th>N°</th><th>Quand</th><th>Type</th><th>Mois</th><th>Montant</th><th>Détail</th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ JOURNAL FINANCIER ============ -->
+  <div class="tab" id="v-journal">
+    <div class="head"><div><h1>Journal financier</h1><p class="sub">Toutes les écritures, dans l'ordre de saisie. Immuable : une écriture n'est jamais modifiée ni effacée — une correction est une écriture inverse qui la référence.</p></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap" id="journal-filters">
+        <div class="field" style="margin:0"><label for="jl-mat">Matricule</label><select id="jl-mat"><option value="">Tous</option></select></div>
+        <div class="field" style="margin:0"><label for="jl-type">Type</label><select id="jl-type"><option value="">Tous</option><option value="paiement">Paiements</option><option value="contrepassation">Contre-passations</option></select></div>
+        <div class="field" style="margin:0"><label for="jl-mois">Mois</label><input id="jl-mois" type="month" min="2025-01" max="2026-11"></div>
+      </div></div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="jl-tbl">
+      <thead><tr><th>N°</th><th>Quand</th><th>Auteur</th><th>Type</th><th>Matricule</th><th>Mois</th><th>Montant</th><th>Détail</th><th></th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ SYNTHÈSE ============ -->
+  <div class="tab" id="v-synthese">
+    <div class="head"><div><h1>Synthèse mensuelle</h1><p class="sub">Encaissements par mois et taux de recouvrement : le taux compare les mois réglés aux mois dus par les membres existants à ce mois. Les chiffres sont recalculés par le serveur depuis le journal.</p></div></div>
+    <div class="kpi-row" style="grid-template-columns:repeat(3,1fr)">
+      <div class="kpi gold"><span class="lab">Encaissé sur l'année</span><div class="val" id="k-sy-total">–</div></div>
+      <div class="kpi"><span class="lab">Écritures de l'année</span><div class="val" id="k-sy-nb">–</div></div>
+      <div class="kpi"><span class="lab">Contre-passations</span><div class="val" id="k-sy-rev">–</div></div>
+    </div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="sy-tbl">
+      <thead><tr><th>Mois</th><th>Mois dus (obligations)</th><th>Mois réglés</th><th>Taux</th><th>Encaissé</th><th>Écritures</th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ JOURNAL D'AUDIT ============ -->
+  <div class="tab" id="v-audit">
+    <div class="head"><div><h1>Journal d'audit</h1><p class="sub">Lecture seule (RG-X2) : encaissements, refus, tentatives d'intrusion. Chaque entrée est chaînée par hachage à la précédente : toute altération devient détectable.</p></div>
+      <button class="btn pri" id="btn-audit-verify">Vérifier l'intégrité de la chaîne</button></div>
+    <div id="audit-verify-result" style="margin-bottom:14px"></div>
+    <div class="card"><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="audit-tbl">
+      <thead><tr><th>#</th><th>Horodatage</th><th>Auteur</th><th>Action</th><th>Détail</th><th>Niveau</th></tr></thead>
+      <tbody></tbody></table></div></div></div>
+  </div>
+
+  <!-- ============ BANC DE TESTS ============ -->
+  <div class="tab" id="v-bench">
+    <div class="head"><div><h1>Banc de tests du module financier</h1><p class="sub">24 scénarios avec des données fictives : encaissements référencés au matricule, mois en double refusés, hors période, contre-passations avec motif, immutabilité du journal, recouvrements et synthèse cohérents. Les appels contournent volontairement l'interface pour prouver que les refus viennent du serveur.</p></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn pri" id="btn-bench-run">Lancer tous les tests</button><button class="btn ghost" id="btn-bench-export">Exporter (JSON)</button></div></div>
+    <div class="bench-summary">
+      <div class="kpi gold"><span class="lab">Scénarios exécutés</span><div class="val" id="bs-total">–</div></div>
+      <div class="kpi"><span class="lab">Conformes (✓)</span><div class="val" id="bs-pass">–</div></div>
+      <div class="kpi"><span class="lab">Écarts (✗)</span><div class="val" id="bs-fail">–</div></div>
+      <div class="kpi"><span class="lab">Durée</span><div class="val" id="bs-time">–</div></div>
+    </div>
+    <div id="bench-results"><div class="note info"><span>▶</span><span><b>Lancez la suite.</b> Données fictives uniquement ; l'environnement est réinitialisé avant et après l'exécution.</span></div></div>
+  </div>
+
+  <!-- ============ CONSOLE D'INTRUSION ============ -->
+  <div class="tab" id="v-intrusion">
+    <div class="head"><div><h1>Console d'intrusion</h1><p class="sub">Attaques lancées hors de l'interface : encaissement par un non-trésorier, contre-passation par le président, suppression d'écriture (qui n'existe pas), jeton forgé.</p></div></div>
+    <div class="card" style="margin-bottom:16px"><div id="attacks"></div></div>
+    <div class="card"><div class="card-h"><h2>Réponses brutes du serveur</h2><button class="btn ghost sm" id="btn-console-clear">Effacer la console</button></div><div class="card-b"><div class="console" id="console-out">Console prête. Choisissez une attaque ci-dessus.</div></div></div>
+  </div>
+
+  <!-- ============ PRODUCTION & LIMITES ============ -->
+  <div class="tab" id="v-archi">
+    <div class="head"><div><h1>Correspondance production et limites</h1><p class="sub">Le prototype spécifie les comportements ; la production les porte sur la stack validée AT-1 (Node.js + Express, PostgreSQL, IndexedDB/Dexie pour la file locale).</p></div></div>
+    <div class="card"><div class="card-h"><h2>Du prototype à la production</h2></div>
+      <div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="map-tbl">
+        <thead><tr><th>Mécanisme (prototype)</th><th>Implémentation de production</th><th>Verrou</th></tr></thead>
+        <tbody id="map-body"></tbody></table></div></div></div>
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card"><div class="card-h"><h2>Limites assumées</h2><span class="tag warn">Honnêteté avant tout</span></div><div class="card-b tight"><div class="tbl-wrap"><table class="tbl" id="flaws-tbl">
+        <thead><tr><th>#</th><th>Constat</th><th>Traitement en production</th></tr></thead>
+        <tbody id="flaws-body"></tbody></table></div></div></div>
+      <div class="card"><div class="card-h"><h2>Les règles du journal financier, en bref</h2></div><div class="card-b"><div style="display:grid;gap:10px;font-size:13.5px" id="rules-list"></div></div></div>
+    </div>
+  </div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+<script>
+"use strict";
+/* ==================================================================
+   SERVEUR SIMULÉ — comptes, registre membres, journal financier,
+   sessions et audit vivent ici et nulle part ailleurs. Le client ne
+   reçoit que des projections (DTO) sans référence interne.
+   ================================================================== */
+const SERVER = (() => {
+  const enc = new TextEncoder();
+  if (!window.crypto || !crypto.subtle) { alert("Navigateur sans Web Crypto : ce prototype exige un navigateur moderne."); throw new Error("no crypto"); }
+  async function sha256(str) {
+    const d = await crypto.subtle.digest("SHA-256", enc.encode(str));
+    return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  async function pbkdf2(pass, saltHex, iters = 120000) {
+    const key = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveBits"]);
+    const salt = new Uint8Array((saltHex.match(/../g) || []).map(h => parseInt(h, 16)));
+    const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: iters }, key, 256);
+    return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  const rand = n => [...crypto.getRandomValues(new Uint8Array(n))].map(b => b.toString(16).padStart(2, "0")).join("");
+
+  const PERIODE_COURANTE = "2026-11";
+  const MONTANT_MENSUEL = 1000;
+  const MODES = ["Espèces", "Mobile money", "Virement"];
+  const now = () => Date.now();
+  const iso = () => new Date(now()).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  const SESSION_TTL = 8 * 3600 * 1000;
+  const users = [], sessions = new Map();
+  let auditSeq = 0, auditLog = [], auditTail = Promise.resolve();
+  async function _audit(action, actor, role, detail, level) {
+    const e = { seq: ++auditSeq, ts: iso(), actor: actor || "système", role: role || "—", action, detail: detail || "", level: level || "INFO", prev: auditLog.length ? auditLog[auditLog.length - 1].hash : "GENÈSE" };
+    e.hash = await sha256([e.seq, e.ts, e.actor, e.action, e.detail, e.prev].join("|"));
+    auditLog.push(e);
+    return e.seq;
+  }
+  function audit(action, actor, role, detail, level) {
+    const p = auditTail.then(() => _audit(action, actor, role, detail, level));
+    auditTail = p.then(() => undefined, () => undefined);
+    return p;
+  }
+  async function verifyAudit() {
+    let prev = "GENÈSE";
+    for (const e of auditLog) {
+      const h = await sha256([e.seq, e.ts, e.actor, e.action, e.detail, e.prev].join("|"));
+      if (e.prev !== prev) return { integre: false, seq: e.seq, motif: "chaîne rompue (lien avec l'entrée précédente)" };
+      if (h !== e.hash) return { integre: false, seq: e.seq, motif: "contenu modifié (hash recomposé différent)" };
+      prev = e.hash;
+    }
+    return { integre: true, seq: auditSeq, motif: "" };
+  }
+
+  const R = { admin: "Administrateur", president: "Président", tresorier: "Trésorier", secretaire: "Secrétaire général", bureau: "Autre membre du bureau", membre: "Membre ordinaire" };
+  const PERMS = {
+    "auth.self":          ["admin","president","tresorier","secretaire","bureau","membre"],
+    "members.view_self":  ["admin","president","tresorier","secretaire","bureau","membre"],
+    "members.view_all":   ["admin","president","tresorier","secretaire","bureau"],
+    "finance.view_self":  ["admin","president","tresorier","secretaire","bureau","membre"],
+    "finance.view_all":   ["admin","president","tresorier","secretaire","bureau"],
+    "finance.create":     ["tresorier"],
+    "finance.reverse":    ["tresorier"],
+    "audit.view":         ["admin","president"]
+  };
+
+  /* ── Registre des membres (reprise du module validé 6f) ── */
+  const members = [], mCounter = {};
+  const norm = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const mDTO = m => ({ id: m.id, matricule: m.matricule, nom: m.nom, prenom: m.prenom, tribu: m.tribu, statut: m.statut, date_adhesion: m.date_adhesion });
+  function nextMatricule(year) { mCounter[year] = (mCounter[year] || 0) + 1; return "ADLCI-" + year + "-" + String(mCounter[year]).padStart(4, "0"); }
+  const findMatricule = mat => members.find(m => m.matricule === String(mat || "").trim());
+
+  /* ── Journal financier ── */
+  const ledger = [];
+  const idx = ym => { const [y, m] = ym.split("-").map(Number); return y * 12 + (m - 1); };
+  const curIdx = idx(PERIODE_COURANTE);
+  function owedMonths(m) { const a = idx(m.date_adhesion.slice(0, 7)); const out = []; for (let i = a; i <= curIdx; i++) out.push(Math.floor(i / 12) + "-" + String(i % 12 + 1).padStart(2, "0")); return out; }
+  function paidMonths(matricule) {
+    const reversed = new Set(ledger.filter(e => e.type === "contrepassation" && e.matricule === matricule).map(e => e.annule));
+    return new Set(ledger.filter(e => e.type === "paiement" && e.matricule === matricule && !reversed.has(e.no)).map(e => e.mois));
+  }
+  function ledgerDTO(e) { return { no: e.no, ts: e.ts, actor: e.actor, type: e.type, matricule: e.matricule, mois: e.mois, montant: e.montant, mode: e.mode || null, ref: e.ref || null, motif: e.motif || null, annule: e.annule || null }; }
+
+  const resp = (status, code, msg, data, auditId) => ({ status, code, msg, data: data ?? null, auditId: auditId ?? null });
+  function openSession(u) { const t = rand(32); sessions.set(t, { userId: u.id, exp: now() + SESSION_TTL }); return t; }
+  const userDTO = u => ({ id: u.id, user: u.user, nom: u.nom, role: u.role, roleLabel: R[u.role], statut: u.statut, matricule: u.matricule });
+  async function guard(req, def) {
+    if (!def) { const a = await audit("ENDPOINT_INEXISTANT", req.actorLabel || "inconnu", "—", (req.endpoint || "?") + " — requête rejetée, le journal financier est immuable", "BLOCAGE"); return resp(404, "ENDPOINT_INEXISTANT", "Cette action n'existe pas sur le serveur — en particulier, une écriture financière ne peut jamais être modifiée ni supprimée.", null, a); }
+    if (def.public) return null;
+    const s = req.token && sessions.get(req.token);
+    if (!req.token || !s) { const a = await audit("SESSION_REQUISE", req.actorLabel || "anonyme", "—", req.endpoint + " sans session valide" + (req.token ? " (jeton inconnu ou révoqué)" : ""), "BLOCAGE"); return resp(401, "AUTH_REQUISE", "Vous devez être connecté pour cette action." + (req.token ? " Jeton inconnu du serveur — l'essai a été enregistré." : ""), null, a); }
+    if (s.exp <= now()) { sessions.delete(req.token); const a = await audit("SESSION_EXPIREE", "?", "—", req.endpoint, "BLOCAGE"); return resp(401, "SESSION_EXPIREE", "Votre session a expiré (8 heures). Reconnectez-vous.", null, a); }
+    const u = users.find(x => x.id === s.userId);
+    if (!u || u.statut !== "actif") { sessions.delete(req.token); return resp(401, "COMPTE_DESACTIVE", "Ce compte est désactivé.", null, await audit("COMPTE_REFUSE", u ? u.user : "?", "—", req.endpoint, "BLOCAGE")); }
+    if (def.perm && !PERMS[def.perm]?.includes(u.role)) { const a = await audit("TENTATIVE_NON_AUTORISEE", u.user, R[u.role], req.endpoint + " exige « " + (def.perm || "—") + " » — rôle « " + R[u.role] + " » refusé", "ALERTE"); return resp(403, "ACCES_REFUSE", "Votre rôle (« " + R[u.role] + " ») n'autorise pas cette action. Le refus est prononcé par le serveur et enregistré au journal.", null, a); }
+    req.user = u;
+    return null;
+  }
+
+  /* ── Endpoints ── */
+  const EP = {};
+  EP["auth.login"] = { public: true, async h(req) {
+    const { user, pass } = req.body || {};
+    const u = users.find(x => x.user === user);
+    if (!u) return resp(401, "IDENTIFIANT_INVALIDE", "Identifiant ou mot de passe incorrect.", null, await audit("CONNEXION_ECHEC", String(user || "?"), "—", "identifiant inconnu", "ALERTE"));
+    const h = await pbkdf2(pass || "", u.salt);
+    if (h !== u.hash) return resp(401, "IDENTIFIANT_INVALIDE", "Identifiant ou mot de passe incorrect.", null, await audit("CONNEXION_ECHEC", u.user, R[u.role], "mot de passe incorrect", "ALERTE"));
+    const t = openSession(u);
+    return resp(200, "OK", "Bienvenue " + u.nom + " — session ouverte pour 8 heures.", { token: t, user: userDTO(u), perms: Object.keys(PERMS).filter(p => PERMS[p].includes(u.role)) }, await audit("CONNEXION", u.user, R[u.role], "session ouverte pour 8 h"));
+  } };
+  EP["auth.logout"] = { perm: "auth.self", async h(req) { sessions.delete(req.token); return resp(200, "OK", "Session fermée.", null, await audit("DECONNEXION", req.user.user, R[req.user.role], "session fermée")); } };
+
+  EP["members.list"] = { perm: "members.view_all", async h(req) {
+    const q = norm((req.body || {}).q);
+    let out = members.slice();
+    if (q) out = out.filter(m => norm(m.nom + " " + m.prenom).includes(q) || m.matricule.toLowerCase().includes(q));
+    out.sort((a, b) => (a.nom + a.prenom).localeCompare(b.nom + b.prenom, "fr"));
+    return resp(200, "OK", out.length + " fiche(s).", out.map(mDTO));
+  } };
+
+  /* Encaissement : référence obligatoire au matricule, un mois = un paiement */
+  EP["finance.pay"] = { perm: "finance.create", async h(req) {
+    const b = req.body || {};
+    const mat = String(b.matricule || "").trim();
+    if (!mat) return resp(422, "MATRICULE_REQUIS", "Saisie refusée : le matricule du membre est obligatoire — jamais un nom libre.", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], "matricule absent", "ALERTE"));
+    const m = findMatricule(mat);
+    if (!m) return resp(404, "MATRICULE_INCONNU", "Aucune fiche ne porte le matricule " + mat + " : l'encaissement est refusé. Consultez le registre du module membres.", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], "matricule inconnu " + mat, "ALERTE"));
+    const mois = String(b.mois || "").trim();
+    if (!/^\d{4}-\d{2}$/.test(mois) || Number(mois.slice(5, 7)) < 1 || Number(mois.slice(5, 7)) > 12) return resp(422, "MOIS_INVALIDE", "Mois invalide : format AAAA-MM attendu (ex. " + PERIODE_COURANTE + ").", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], "mois « " + mois + " »", "ALERTE"));
+    const montant = Number(b.montant);
+    if (!Number.isInteger(montant) || montant <= 0) return resp(422, "MONTANT_INVALIDE", "Montant invalide : entier strictement positif attendu (valeur reçue : " + String(b.montant) + ").", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], m.matricule + " montant " + String(b.montant), "ALERTE"));
+    if (!MODES.includes(b.mode)) return resp(422, "MODE_INCONNU", "Mode de paiement inconnu : " + MODES.join(", ") + ".", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], String(b.mode), "ALERTE"));
+    const mi = idx(mois);
+    const adh = idx(m.date_adhesion.slice(0, 7));
+    if (mi < adh) return resp(422, "HORS_PERIODE", "Mois refusé : " + mois + " est antérieur à la date d'adhésion du membre (" + m.date_adhesion + ").", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], m.matricule + " " + mois + " avant adhésion", "ALERTE"));
+    if (mi > curIdx) return resp(422, "HORS_PERIODE", "Mois refusé : " + mois + " est dans le futur (période courante : " + PERIODE_COURANTE + ").", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], m.matricule + " " + mois + " futur", "ALERTE"));
+    if (paidMonths(m.matricule).has(mois)) return resp(409, "MOIS_DEJA_REGLE", "Le mois " + mois + " est déjà réglé pour " + m.matricule + " : un mois ne se paie qu'une fois. Utilisez le journal pour vérifier, et la contre-passation pour corriger une erreur.", null, await audit("ENCAISSEMENT_REJETE", req.user.user, R[req.user.role], m.matricule + " " + mois + " déjà réglé", "ALERTE"));
+    const ref = String(b.ref || "").trim().slice(0, 40) || ("REC-" + mois + "-" + String(ledger.length + 1).padStart(4, "0"));
+    const e = { no: ledger.length + 1, ts: iso(), actor: req.user.user, type: "paiement", matricule: m.matricule, mois, montant, mode: b.mode, ref, motif: null, annule: null };
+    ledger.push(e);
+    const restant = owedMonths(m).filter(x => !paidMonths(m.matricule).has(x)).length;
+    return resp(200, "OK", "Encaissement n° " + e.no + " enregistré : " + montant.toLocaleString("fr-FR") + " FCFA de " + m.nom + " " + m.prenom + " (" + m.matricule + ") pour " + mois + ". Mois restant dus : " + restant + ".", { ...ledgerDTO(e), restantDus: restant }, await audit("ENCAISSEMENT", req.user.user, R[req.user.role], m.matricule + " — " + mois + " — " + montant.toLocaleString("fr-FR") + " FCFA — " + b.mode + " — reçu " + ref));
+  } };
+
+  /* Contre-passation : correction par écriture inverse, jamais de suppression */
+  EP["finance.reverse"] = { perm: "finance.reverse", async h(req) {
+    const b = req.body || {};
+    const no = Number(b.no);
+    const e = ledger.find(x => x.no === no);
+    if (!e) return resp(404, "ECRITURE_INCONNUE", "Aucune écriture ne porte le numéro " + b.no + ".", null, await audit("CONTREPASSATION_REJETEE", req.user.user, R[req.user.role], "n° " + b.no, "ALERTE"));
+    if (e.type !== "paiement") return resp(409, "DEJA_CONTREPASSEE", "L'écriture n° " + no + " est déjà une contre-passation : elle n'est pas annulable.", null, await audit("CONTREPASSATION_REJETEE", req.user.user, R[req.user.role], "n° " + no + " est déjà une contre-passation", "ALERTE"));
+    if (ledger.some(x => x.type === "contrepassation" && x.annule === no)) return resp(409, "DEJA_ANNULEE", "L'écriture n° " + no + " a déjà été contre-passée : elle reste au journal et ne peut pas être annulée deux fois.", null, await audit("CONTREPASSATION_REJETEE", req.user.user, R[req.user.role], "n° " + no + " déjà annulée", "ALERTE"));
+    const motif = String(b.motif || "").trim();
+    if (motif.length < 10) return resp(422, "MOTIF_REQUIS", "Contre-passation refusée : un motif d'au moins 10 caractères est obligatoire (erreur de saisie, mois annulé, doublon…) — la trace doit rester lisible pour le bureau.", null, await audit("CONTREPASSATION_REJETEE", req.user.user, R[req.user.role], "n° " + no + " motif insuffisant", "ALERTE"));
+    const r = { no: ledger.length + 1, ts: iso(), actor: req.user.user, type: "contrepassation", matricule: e.matricule, mois: e.mois, montant: -e.montant, mode: null, ref: null, motif: motif.slice(0, 200), annule: e.no };
+    ledger.push(r);
+    return resp(200, "OK", "Contre-passation n° " + r.no + " enregistrée : l'écriture n° " + e.no + " (" + e.matricule + ", " + e.mois + ") est annulée comptablement mais reste visible au journal. Le mois redevient réglable.", { ...ledgerDTO(r) }, await audit("CONTREPASSATION", req.user.user, R[req.user.role], "n° " + r.no + " annule l'écriture n° " + e.no + " (" + e.matricule + ", " + e.mois + ", " + e.montant.toLocaleString("fr-FR") + " FCFA) — motif : " + motif.slice(0, 120)));
+  } };
+
+  EP["finance.ledger"] = { perm: "finance.view_all", async h(req) {
+    const b = req.body || {};
+    let out = ledger.slice();
+    if (b.matricule) out = out.filter(e => e.matricule === String(b.matricule).trim());
+    if (b.type) out = out.filter(e => e.type === b.type);
+    if (b.mois) out = out.filter(e => e.mois === String(b.mois).trim());
+    return resp(200, "OK", out.length + " écriture(s) — filtres appliqués par le serveur.", out.map(ledgerDTO));
+  } };
+  EP["finance.state"] = { perm: "finance.view_self", async h(req) {
+    const mat = String((req.body || {}).matricule || "").trim();
+    const m = findMatricule(mat);
+    if (!m) return resp(404, "MATRICULE_INCONNU", "Aucune fiche ne porte le matricule " + mat + ".");
+    const own = req.user.matricule === m.matricule;
+    if (!own && !PERMS["finance.view_all"].includes(req.user.role)) { const a = await audit("TENTATIVE_NON_AUTORISEE", req.user.user, R[req.user.role], "situation de " + m.matricule + " sans droit finance.view_all", "ALERTE"); return resp(403, "ACCES_REFUSE", "Un membre ne consulte que sa propre situation financière. Celle des autres est réservée au bureau.", null, a); }
+    const owed = owedMonths(m), paid = paidMonths(m.matricule);
+    const dus = owed.filter(x => !paid.has(x));
+    const entries = ledger.filter(e => e.matricule === m.matricule);
+    const totalPaye = entries.filter(e => e.type === "paiement" && !entries.some(r => r.type === "contrepassation" && r.annule === e.no)).reduce((s, e) => s + e.montant, 0);
+    const totalAnnule = entries.filter(e => e.type === "contrepassation").reduce((s, e) => s + Math.abs(e.montant), 0);
+    return resp(200, "OK", "Situation de " + m.matricule + " : " + dus.length + " mois dû(s), " + (owed.length - dus.length) + " mois réglé(s).", { matricule: m.matricule, nom: m.nom, prenom: m.prenom, tribu: m.tribu, statut: m.statut, date_adhesion: m.date_adhesion, moisDus: dus, moisRegle: owed.length - dus.length, totalPaye, totalAnnule, own });
+  } };
+  EP["finance.recoveries"] = { perm: "finance.view_all", async h(req) {
+    const rows = members.map(m => { const owed = owedMonths(m), paid = paidMonths(m.matricule); const dus = owed.filter(x => !paid.has(x)); const totalPaye = ledger.filter(e => e.type === "paiement" && e.matricule === m.matricule && !ledger.some(r => r.type === "contrepassation" && r.annule === e.no)).reduce((s, e) => s + e.montant, 0); return { matricule: m.matricule, nom: m.nom, prenom: m.prenom, tribu: m.tribu, statut: m.statut, moisDus: dus, moisRegle: owed.length - dus.length, totalPaye }; }).sort((a, b) => b.moisDus.length - a.moisDus.length || (a.nom + a.prenom).localeCompare(b.nom + b.prenom, "fr"));
+    const parTribu = {}; rows.forEach(r => { parTribu[r.tribu] = parTribu[r.tribu] || { dus: 0, membres: 0, dusMembres: 0 }; parTribu[r.tribu].membres++; parTribu[r.tribu].dus += r.moisDus.length; if (r.moisDus.length) parTribu[r.tribu].dusMembres++; });
+    return resp(200, "OK", rows.reduce((s, r) => s + r.moisDus.length, 0) + " mois dus au registre — répartition calculée par le serveur.", { rows, parTribu });
+  } };
+  EP["finance.summary"] = { perm: "finance.view_all", async h(req) {
+    const annee = Number((req.body || {}).annee) || 2026;
+    const rows = [];
+    for (let m = 1; m <= 12; m++) {
+      const ym = annee + "-" + String(m).padStart(2, "0");
+      const mi = idx(ym);
+      if (mi > curIdx) { rows.push({ mois: ym, dus: 0, regles: 0, taux: 0, encaisse: 0, ecritures: 0, futur: true }); continue; }
+      const dus = members.filter(x => idx(x.date_adhesion.slice(0, 7)) <= mi).length;
+      const regles = ledger.filter(e => e.type === "paiement" && e.mois === ym && !ledger.some(r => r.type === "contrepassation" && r.annule === e.no)).length;
+      const encaisse = ledger.filter(e => e.mois === ym).reduce((s, e) => s + e.montant, 0);
+      const ecritures = ledger.filter(e => e.mois === ym).length;
+      rows.push({ mois: ym, dus, regles, taux: dus ? Math.round(regles / dus * 1000) / 10 : 0, encaisse, ecritures, futur: false });
+    }
+    return resp(200, "OK", "Synthèse " + annee + " recalculée depuis le journal.", { annee, rows, total: rows.reduce((s, r) => s + r.encaisse, 0), nbEcritures: rows.reduce((s, r) => s + r.ecritures, 0) });
+  } };
+
+  EP["audit.list"] = { perm: "audit.view", async h(req) { return resp(200, "OK", auditLog.length + " entrées.", auditLog.map(e => ({ ...e }))); } };
+  EP["audit.verify"] = { perm: "audit.view", async h(req) { const v = await verifyAudit(); return resp(200, "OK", v.integre ? "Chaîne intègre : aucune altération détectée sur " + v.seq + " entrées." : "ALERTE : chaîne compromise à l'entrée n° " + v.seq + " — " + v.motif, { ...v }); } };
+  EP["audit.tamper_demo"] = { perm: "audit.view", async h(req) { if (auditLog.length > 1) { const k = auditLog[Math.min(2, auditLog.length - 1)]; k.detail = k.detail + " [MODIFIÉ PAR UN ATTAQUANT]"; } return resp(200, "OK", "Simulation : une entrée ancienne a été altérée. Relancez la vérification d'intégrité."); } };
+
+  async function api(req) {
+    req.endpoint = req.endpoint || "?";
+    try {
+      const def = EP[req.endpoint];
+      const g = await guard(req, def);
+      if (g) return g;
+      return await def.h(req);
+    } catch (e) {
+      return resp(500, "ERREUR_SERVEUR", "Une erreur interne est survenue — l'action n'a pas été effectuée et a été journalisée.", null, await audit("ERREUR_INTERNE", "système", "—", req.endpoint + " : " + (e && e.message || "?"), "ALERTE"));
+    }
+  }
+
+  /* ── Amorçage : comptes, fiches et journal fictifs ── */
+  async function seed() {
+    const defs = [
+      ["s.diallo", "Admin-2026!CI", "admin", "Salif Diallo", "ADLCI-2026-0003"],
+      ["m.kante", "President-2026!", "president", "Mariam Kanté", "ADLCI-2026-0002"],
+      ["a.traore", "Tresor-2026!CI", "tresorier", "Awa Traoré", null],
+      ["f.cisse", "Secretariat-2026!", "secretaire", "Fatoumata Cissé", "ADLCI-2025-0004"],
+      ["n.aka", "Bureau-2026!CI", "bureau", "Nantenin Aka", "ADLCI-2025-0006"],
+      ["k.yao", "Membre-2026!CI", "membre", "Kouassi Yao", "ADLCI-2025-0001"]
+    ];
+    users.length = 0;
+    for (const [user, pass, role, nom, matricule] of defs) {
+      const salt = rand(16);
+      users.push({ id: users.length + 1, user, nom, role, statut: "actif", salt, hash: await pbkdf2(pass, salt), derniere: "—", matricule });
+    }
+    sessions.clear();
+    await auditTail; auditSeq = 0; auditLog = []; auditTail = Promise.resolve();
+    members.length = 0; ledger.length = 0;
+    for (const k of Object.keys(mCounter)) delete mCounter[k];
+    const seedM = [
+      ["Kouassi", "Yao", "Douayêro", "2025-03-08", "actif", 0],
+      ["Ibrahima", "Sanogo", "Mariabêh", "2025-03-08", "actif", 2],
+      ["Aminata", "Bamba", "Abouyabêh", "2025-04-12", "actif", 0],
+      ["Fatoumata", "Cissé", "Aliyabêh", "2025-04-12", "actif", 0],
+      ["Adama", "Ouédraogo", "Simbayabêh", "2025-05-03", "inactif", 3],
+      ["Nantenin", "Aka", "Djigayabêh", "2025-05-03", "actif", 0],
+      ["Moussa", "Koné", "Douayêro", "2026-02-14", "actif", 1],
+      ["Mariam", "Kanté", "Mariabêh", "2026-02-14", "actif", 0],
+      ["Salif", "Diallo", "Abouyabêh", "2026-03-21", "actif", 0]
+    ];
+    /* nonPayes : mois laissés volontairement dus pour chaque membre */
+    const nonPayes = { 2: ["2026-10", "2026-11"], 5: ["2026-09", "2026-10", "2026-11"], 7: ["2026-11"] };
+    for (const [prenom, nom, tribu, date, statut] of seedM) {
+      members.push({ id: members.length + 1, matricule: nextMatricule(date.slice(0, 4)), nom, prenom, tribu, date_adhesion: date, statut });
+    }
+    for (const m of members) {
+      const skip = nonPayes[m.id] || [];
+      for (const mois of owedMonths(m)) {
+        if (skip.includes(mois)) continue;
+        ledger.push({ no: ledger.length + 1, ts: iso(), actor: "a.traore", type: "paiement", matricule: m.matricule, mois, montant: MONTANT_MENSUEL, mode: "Espèces", ref: "REC-" + mois + "-" + String(ledger.length + 1).padStart(4, "0"), motif: null, annule: null });
+      }
+    }
+    await audit("SYSTEME_AMORCE", "système", "—", "Journal financier initialisé : " + ledger.length + " écritures fictives (cotisations mensuelles de " + MONTANT_MENSUEL + " FCFA), 9 membres fictifs, 6 comptes nominatifs. Mois dus attendus : Ibrahima Sanogo 2, Adama Ouédraogo 3 (inactif, dettes conservées), Moussa Koné 1.");
+  }
+
+  return { api, seed, R, PERMS, MODES, MONTANT_MENSUEL, PERIODE_COURANTE, TRIBUS: ["Douayêro","Mariabêh","Abouyabêh","Aliyabêh","Simbayabêh","Djigayabêh"], stats: () => ({ users: users.length, members: members.length, ledger: ledger.length, audit: auditSeq }) };
+})();
+/* ==================================================================
+   BANC DE TESTS — 24 scénarios, données fictives, appels directs au
+   serveur sans passer par l'interface.
+   ================================================================== */
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+let BENCH_RESULTS = [];
+async function login(u, p) { return await SERVER.api({ endpoint: "auth.login", body: { user: u, pass: p } }); }
+async function call(endpoint, token, body) { return await SERVER.api({ endpoint, token, body }); }
+
+const BENCH = [
+  /* ── G1 · Encaissements ── */
+  { id: "F1", g: 1, titre: "Encaissement valide référencé au matricule", attendu: "200 ; écriture n° attribuée ; le mois restant dû de Moussa Koné passe à 0",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r = await call("finance.pay", t, { matricule: "ADLCI-2026-0001", mois: "2026-11", montant: 1000, mode: "Mobile money", ref: "MM-2026-11-0007" }); return { obtenu: "status " + r.status + " — " + r.msg.slice(0, 120), pass: r.status === 200 && r.data.restantDus === 0 && r.data.type === "paiement" && r.data.actor === "a.traore", detail: "L'écriture référence ADLCI-2026-0001 : jamais un nom saisi à la main." } } },
+  { id: "F2", g: 1, titre: "Un mois déjà réglé ne se paie pas deux fois", attendu: "409 MOIS_DEJA_REGLE",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r = await call("finance.pay", t, { matricule: "ADLCI-2026-0001", mois: "2026-11", montant: 1000, mode: "Espèces" }); return { obtenu: "status " + r.status + " (" + r.code + ") — " + r.msg.slice(0, 110), pass: r.status === 409 && r.code === "MOIS_DEJA_REGLE", detail: r.msg } } },
+  { id: "F3", g: 1, titre: "Référence au registre obligatoire", attendu: "404 pour un matricule inconnu ; 422 si le matricule est absent",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r1 = await call("finance.pay", t, { matricule: "ADLCI-2026-9999", mois: "2026-11", montant: 1000, mode: "Espèces" }); const r2 = await call("finance.pay", t, { matricule: "", mois: "2026-11", montant: 1000, mode: "Espèces" }); return { obtenu: "inconnu " + r1.status + " (" + r1.code + ") ; vide " + r2.status + " (" + r2.code + ")", pass: r1.status === 404 && r2.status === 422, detail: "Le serveur refuse un paiement sans fiche existante : la comptabilité suit le registre, jamais l'inverse." } } },
+  { id: "F4", g: 1, titre: "Montants invalides refusés un par un", attendu: "422 pour 0, −500, 500,5 et « abc »",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const vs = [0, -500, 500.5, "abc"]; const rs = []; for (const v of vs) rs.push((await call("finance.pay", t, { matricule: "ADLCI-2025-0002", mois: "2026-10", montant: v, mode: "Espèces" })).status); return { obtenu: rs.join(" / "), pass: rs.every(s => s === 422), detail: "Entier strictement positif seulement." } } },
+  { id: "F5", g: 1, titre: "Mois hors période refusés : avant adhésion et futur", attendu: "422 HORS_PERIODE dans les deux cas, motifs distincts",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r1 = await call("finance.pay", t, { matricule: "ADLCI-2026-0002", mois: "2026-01", montant: 1000, mode: "Espèces" }); const r2 = await call("finance.pay", t, { matricule: "ADLCI-2026-0002", mois: "2027-01", montant: 1000, mode: "Espèces" }); return { obtenu: "avant adhésion " + r1.status + " ; futur " + r2.status, pass: r1.status === 422 && r2.status === 422 && /antérieur/.test(r1.msg) && /futur/.test(r2.msg), detail: "Mariam Kanté a adhéré le 2026-02-14 : 2026-01 est avant son adhésion." } } },
+  { id: "F6", g: 1, titre: "Seul le trésorier encaisse", attendu: "403 pour le membre ordinaire et pour le secrétaire général",
+    async fn() { const tm = (await login("k.yao", "Membre-2026!CI")).data.token; const r1 = await call("finance.pay", tm, { matricule: "ADLCI-2025-0001", mois: "2026-11", montant: 1000, mode: "Espèces" }); const ts = (await login("f.cisse", "Secretariat-2026!")).data.token; const r2 = await call("finance.pay", ts, { matricule: "ADLCI-2025-0001", mois: "2026-11", montant: 1000, mode: "Espèces" }); return { obtenu: "membre " + r1.status + " ; secrétaire " + r2.status, pass: r1.status === 403 && r2.status === 403, detail: "Le bouton « + Encaisser » est masqué pour eux, mais l'API serait attaquable sans le refus serveur." } } },
+
+  /* ── G2 · Consultation ── */
+  { id: "F7", g: 2, titre: "Journal financier réservé au bureau", attendu: "liste complète pour un membre du bureau ; 403 pour un membre ordinaire",
+    async fn() { const tb = (await login("n.aka", "Bureau-2026!CI")).data.token; const r1 = await call("finance.ledger", tb, {}); const tm = (await login("k.yao", "Membre-2026!CI")).data.token; const r2 = await call("finance.ledger", tm, {}); return { obtenu: "bureau : " + r1.data.length + " écritures ; membre ordinaire : " + r2.status, pass: r1.status === 200 && r1.data.length > 100 && r2.status === 403, detail: r2.msg } } },
+  { id: "F8", g: 2, titre: "Un membre ne consulte que sa situation", attendu: "sa situation → 200 (own) ; celle d'un autre → 403",
+    async fn() { const tm = (await login("k.yao", "Membre-2026!CI")).data.token; const r1 = await call("finance.state", tm, { matricule: "ADLCI-2025-0001" }); const r2 = await call("finance.state", tm, { matricule: "ADLCI-2025-0005" }); return { obtenu: "sienne " + r1.status + " (own=" + r1.data.own + ", " + r1.data.moisDus.length + " mois dus) ; autre " + r2.status, pass: r1.status === 200 && r1.data.own === true && r2.status === 403, detail: r2.msg } } },
+  { id: "F9", g: 2, titre: "Filtres du journal traités par le serveur", attendu: "par matricule : les 19 écritures de Sanogo ; type contrepassation : 0 à ce stade",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r1 = await call("finance.ledger", t, { matricule: "ADLCI-2025-0002" }); const r2 = await call("finance.ledger", t, { type: "contrepassation" }); const r3 = await call("finance.ledger", t, { matricule: "ADLCI-2025-0002", mois: "2026-11" }); return { obtenu: "Sanogo : " + r1.data.length + " ; contrepassations : " + r2.data.length + " ; Sanogo+mois : " + r3.data.length, pass: r1.data.length === 19 && r2.data.length === 0 && r3.data.length === 0, detail: "Sanogo doit les mois 2026-10 et 2026-11 : aucune écriture de ces mois." } } },
+  { id: "F10", g: 2, titre: "Situation d'un membre en retard cohérente avec le registre", attendu: "ADLCI-2025-0002 : 2 mois dus (2026-10, 2026-11), 19 mois réglés, 19 000 FCFA payés",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r = await call("finance.state", t, { matricule: "ADLCI-2025-0002" }); const d = r.data; return { obtenu: r.status + " — dus " + d.moisDus.join(", ") + " ; réglés " + d.moisRegle + " ; payé " + fc(d.totalPaye), pass: r.status === 200 && d.moisDus.join() === "2026-10,2026-11" && d.moisRegle === 19 && d.totalPaye === 19000, detail: "Adhésion 2025-03-08 → 21 mois d'obligations ; 19 réglés, 2 dus." } } },
+
+  /* ── G3 · Corrections et immutabilité ── */
+  { id: "F11", g: 3, titre: "Contre-passation tracée : écriture inverse, origine conservée", attendu: "200 ; nouvelle écriture négative qui référence l'originale ; le mois redevient dû ; l'écriture n° est toujours au journal",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r1 = await call("finance.ledger", t, { matricule: "ADLCI-2026-0001", mois: "2026-11" }); const orig = r1.data.find(e => e.type === "paiement"); const r = await call("finance.reverse", t, { no: orig.no, motif: "Erreur de saisie : encaissement saisit le mauvais matricule" }); const origStill = (await call("finance.ledger", t, { matricule: "ADLCI-2026-0001", mois: "2026-11" })).data.find(e => e.no === orig.no && e.type === "paiement"); const st = (await call("finance.state", t, { matricule: "ADLCI-2026-0001" })).data; return { obtenu: "contre-passation " + r.status + " (n° " + r.data.no + ", " + fc(r.data.montant) + ") ; origine n° " + orig.no + " toujours visible : " + !!origStill + " ; mois dus de Moussa : " + st.moisDus.length, pass: r.status === 200 && r.data.montant === -1000 && r.data.annule === orig.no && !!origStill && st.moisDus.length === 1, detail: "Le journal reste complet : l'erreur et sa correction sont toutes deux auditables." } } },
+  { id: "F12", g: 3, titre: "Une écriture ne se contre-passe pas deux fois", attendu: "409 DEJA_ANNULEE",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const lg = (await call("finance.ledger", t, { matricule: "ADLCI-2026-0001" })).data; const rev = lg.find(e => e.type === "contrepassation"); const r = await call("finance.reverse", t, { no: rev.annule, motif: "Tentative de seconde annulation" }); return { obtenu: "status " + r.status + " (" + r.code + ") — " + r.msg.slice(0, 100), pass: r.status === 409 && r.code === "DEJA_ANNULEE", detail: r.msg } } },
+  { id: "F13", g: 3, titre: "Contre-passation exige un motif lisible", attendu: "422 sans motif et avec un motif trop court",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const lg = (await call("finance.ledger", t, {})).data; const target = lg.find(e => e.type === "paiement" && e.matricule === "ADLCI-2025-0002"); const r1 = await call("finance.reverse", t, { no: target.no }); const r2 = await call("finance.reverse", t, { no: target.no, motif: "erreur" }); return { obtenu: "sans motif " + r1.status + " ; motif court " + r2.status + " (" + r2.code + ")", pass: r1.status === 422 && r2.status === 422 && r2.code === "MOTIF_REQUIS", detail: "Le motif rend la correction compréhensible pour le bureau et l'audit." } } },
+  { id: "F14", g: 3, titre: "Seul le trésorier contre-passe", attendu: "403 pour le président",
+    async fn() { const tp = (await login("m.kante", "President-2026!")).data.token; const r = await call("finance.reverse", tp, { no: 2, motif: "Correction tentée par la supervision" }); return { obtenu: "status " + r.status + " (" + r.code + ")", pass: r.status === 403, detail: r.msg } } },
+  { id: "F15", g: 3, titre: "Aucune modification ni suppression d'écriture", attendu: "404 ENDPOINT_INEXISTANT pour finance.update et finance.delete",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r1 = await call("finance.update", t, { no: 1, montant: 999 }); const r2 = await call("finance.delete", t, { no: 1 }); return { obtenu: "update " + r1.status + " (" + r1.code + ") ; delete " + r2.status + " (" + r2.code + ")", pass: r1.status === 404 && r2.status === 404, detail: "Les endpoints n'existent pas : le journal ne peut que s'enrichir." } } },
+  { id: "F16", g: 3, titre: "Le mois contre-passé redevient réglable", attendu: "200 — le re-paiement de 2026-11 pour Moussa passe après la contre-passation",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r = await call("finance.pay", t, { matricule: "ADLCI-2026-0001", mois: "2026-11", montant: 1000, mode: "Espèces", ref: "REC-2026-11-regle" }); return { obtenu: "status " + r.status + " — restant dû : " + (r.data && r.data.restantDus), pass: r.status === 200 && r.data.restantDus === 0, detail: "La correction remet le mois en dette sans jamais réécrire l'histoire du journal." } } },
+
+  /* ── G4 · Recouvrements et synthèse ── */
+  { id: "F17", g: 4, titre: "Recouvrements cohérents : qui doit quoi", attendu: "exactement 2 membres avec mois dus : Sanogo 2 (2026-10, 2026-11), Ouédraogo 3 (2026-09, 2026-10, 2026-11)",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r = await call("finance.recoveries", t); const withDus = r.data.rows.filter(x => x.moisDus.length); const san = withDus.find(x => x.matricule === "ADLCI-2025-0002"); const ada = withDus.find(x => x.matricule === "ADLCI-2025-0005"); return { obtenu: withDus.length + " membre(s) en retard : " + withDus.map(x => x.matricule + " → " + x.moisDus.length).join(", "), pass: withDus.length === 2 && san && san.moisDus.join() === "2026-10,2026-11" && ada && ada.moisDus.length === 3 && ada.statut === "inactif", detail: "Adama est inactif : ses cotisations restent dues — les obligations ne s'effacent pas avec le statut." } } },
+  { id: "F18", g: 4, titre: "Répartition des retards par tribu", attendu: "Mariabêh 2 mois dus (Sanogo) ; Simbayabêh 3 (Ouédraogo) ; les quatre autres tribus à 0",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r = await call("finance.recoveries", t); const p = r.data.parTribu; return { obtenu: Object.keys(p).map(k => k + " " + p[k].dus).join(" ; "), pass: p["Mariabêh"] && p["Mariabêh"].dus === 2 && p["Simbayabêh"] && p["Simbayabêh"].dus === 3 && p["Douayêro"].dus === 0 && p["Abouyabêh"].dus === 0 && p["Aliyabêh"].dus === 0 && p["Djigayabêh"].dus === 0, detail: "La carte des recouvrements par tribu sert à mobiliser les responsables." } } },
+  { id: "F19", g: 4, titre: "Synthèse mensuelle recalculée depuis le journal", attendu: "novembre 2026 : 9 obligations, 7 mois réglés, 7 000 FCFA encaissés, taux cohérent",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r = await call("finance.summary", t, { annee: 2026 }); const nov = r.data.rows.find(x => x.mois === "2026-11"); const lg = (await call("finance.ledger", t, { mois: "2026-11" })).data; const exp = lg.reduce((s, e) => s + e.montant, 0); return { obtenu: "novembre : dus " + nov.dus + ", réglés " + nov.regles + ", " + fc(nov.encaisse) + " ; recalcul indépendant : " + fc(exp), pass: nov.dus === 9 && nov.regles === 7 && nov.encaisse === exp && nov.encaisse === 7000 && Math.round(nov.regles / nov.dus * 1000) / 10 === nov.taux, detail: "6 paiements au semis + re-paiement F16 − contre-passation F11 ; la contre-passation déduit aussi l'encaissé du mois." } } },
+  { id: "F20", g: 4, titre: "Cohérence comptable globale du journal", attendu: "numéros consécutifs sans trou ; au plus un paiement valide par membre et par mois ; chaque contre-passation pointe une écriture existante",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const lg = (await call("finance.ledger", t, {})).data; const nums = lg.map(e => e.no).sort((a, b) => a - b); const sansTrou = nums.every((n, i) => n === i + 1); const valides = {}; let conflits = 0; for (const e of lg) { if (e.type === "paiement") { const k = e.matricule + "|" + e.mois; if (valides[k] === false) conflits++; valides[k] = (valides[k] === undefined) ? true : false; } if (e.type === "contrepassation") { const o = lg.find(x => x.no === e.annule); if (!o || o.type !== "paiement") conflits++; } } return { obtenu: lg.length + " écritures, n° 1 à " + nums[nums.length - 1] + " sans trou : " + (sansTrou ? "oui" : "NON") + " ; conflits de doublons/liens : " + conflits, pass: sansTrou && conflits === 0, detail: "L'invariant comptable tient après tous les tests précédents." } } },
+
+  /* ── G5 · Sécurité transversale ── */
+  { id: "F21", g: 5, titre: "Jeton forgé rejeté sur le journal financier", attendu: "401 + entrée d'audit",
+    async fn() { const r = await call("finance.ledger", "forged" + "c".repeat(56)); return { obtenu: "status " + r.status + " — " + r.msg.slice(0, 90), pass: r.status === 401, detail: r.msg } } },
+  { id: "F22", g: 5, titre: "Charge XSS dans la référence de reçu : stockée, rendue échappée", attendu: "aucun script exécutable à l'affichage",
+    async fn() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; const r = await call("finance.pay", t, { matricule: "ADLCI-2025-0002", mois: "2026-10", montant: 1000, mode: "Espèces", ref: "<img src=x onerror=alert(1)>" }); const probe = document.createElement("div"); probe.innerHTML = '<p>' + esc(r.data.ref) + '</p>'; const injected = probe.querySelectorAll("img,script").length; return { obtenu: "stocké : « " + r.data.ref.slice(0, 22) + "… » ; rendu : " + (injected === 0 ? "aucun nœud exécutable" : injected + " nœuds injectés (!)"), pass: r.status === 200 && injected === 0, detail: "Le serveur stocke la valeur ; l'échappement systématique protège l'affichage." } } },
+  { id: "F23", g: 5, titre: "Aucun champ interne ne fuite dans le journal", attendu: "aucune clé sensible (hash, sel, jeton) sur l'ensemble des écritures",
+    async fn() { const t = (await login("s.diallo", "Admin-2026!CI")).data.token; const r = await call("finance.ledger", t, {}); const keys = new Set(); r.data.forEach(e => Object.keys(e).forEach(k => keys.add(k))); const leak = [...keys].filter(k => /hash|salt|token|secret|pwd/i.test(k)); return { obtenu: leak.length ? "FUITE : " + leak.join(", ") : "aucune fuite sur " + keys.size + " champs exposés", pass: leak.length === 0, detail: "Projection DTO contrôlée, comme pour les modules précédents." } } },
+  { id: "F24", g: 5, titre: "Journal d'audit : intègre pendant toute la suite, falsification détectée", attendu: "vérification INTÈGRE, puis altération simulée DÉTECTÉE et désignée",
+    async fn() { const t = (await login("s.diallo", "Admin-2026!CI")).data.token; const v1 = await call("audit.verify", t); await call("audit.tamper_demo", t); const v2 = await call("audit.verify", t); return { obtenu: "avant : " + (v1.data.integre ? "intègre (" + v1.data.seq + " entrées)" : "compromise !") + " ; après altération : " + (v2.data.integre ? "non détectée (!)" : "DÉTECTÉE à l'entrée n° " + v2.data.seq), pass: v1.data.integre === true && v2.data.integre === false, detail: "Le semis produit plus de 150 écritures et la suite des dizaines d'événements : la chaîne reste intègre (écritures sérialisées)." } } }
+];
+
+async function runBench() {
+  const t0 = performance.now();
+  await SERVER.seed();
+  const out = [];
+  for (const sc of BENCH) {
+    try { const r = await sc.fn(); out.push({ ...sc, ...r }); }
+    catch (e) { out.push({ ...sc, obtenu: "exception : " + e.message, pass: false, detail: "" }); }
+  }
+  const ms = Math.round(performance.now() - t0);
+  const pass = out.filter(r => r.pass).length;
+  BENCH_RESULTS = { date: new Date().toLocaleString("fr-FR"), module: "financier — cotisations", total: out.length, pass, fail: out.length - pass, ms, scenarios: out };
+  await doLogout(true, true);
+  await SERVER.seed();
+  renderBench(out, pass, out.length, ms);
+  toast(pass === out.length ? "ok" : "err", pass === out.length ? "Suite complète : " + pass + "/" + out.length + " scénarios conformes." : "Suite terminée avec " + (out.length - pass) + " écart(s) — voir le détail.");
+}
+/* ==================================================================
+   CONSOLE D'INTRUSION
+   ================================================================== */
+const ATTACKS = [
+  { t: "Un membre ordinaire encaisse une cotisation", d: "k.yao appelle directement finance.pay — l'API est attaquée même si aucun bouton ne lui montre le chemin.", async run() { const t = (await login("k.yao", "Membre-2026!CI")).data.token; return await call("finance.pay", t, { matricule: "ADLCI-2025-0001", mois: "2026-11", montant: 1000, mode: "Espèces" }); } },
+  { t: "Le président contre-passe une écriture", d: "La correction du journal est réservée au trésorier.", async run() { const t = (await login("m.kante", "President-2026!")).data.token; return await call("finance.reverse", t, { no: 3, motif: "Tentative de correction hors périmètre" }); } },
+  { t: "Supprimer une écriture du journal", d: "Même le trésorier tente finance.delete — cet endpoint n'existe pas.", async run() { const t = (await login("a.traore", "Tresor-2026!CI")).data.token; return await call("finance.delete", t, { no: 1 }); } },
+  { t: "Lister le journal avec un jeton forgé", d: "Un jeton inventé est présenté comme session valide.", async run() { return await call("finance.ledger", "forged-" + crypto.getRandomValues(new Uint8Array(16)).join("")); } }
+];
+
+/* ==================================================================
+   INTERFACE CLIENT — présentation uniquement, aucune sécurité ici
+   ================================================================== */
+const $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
+function toast(kind, msg) { const t = document.createElement("div"); t.className = "toast " + (kind === "ok" ? "ok" : kind === "err" ? "err" : ""); t.textContent = msg; $("#toasts").appendChild(t); setTimeout(() => { t.style.opacity = "0"; t.style.transition = "opacity .4s"; setTimeout(() => t.remove(), 400); }, 4200); }
+const initials = n => String(n).split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
+const fc = n => Number(n).toLocaleString("fr-FR") + " FCFA";
+
+let SESSION = { token: null, user: null, perms: [] };
+const TABS = [
+  { id: "cotis", label: "Cotisations", perm: "finance.view_all" },
+  { id: "journal", label: "Journal financier", perm: "finance.view_all" },
+  { id: "synthese", label: "Synthèse", perm: "finance.view_all" },
+  { id: "situation", label: "Ma situation", perm: "finance.view_self", ownOnly: true },
+  { id: "audit", label: "Journal d'audit", perm: "audit.view" },
+  { id: "bench", label: "Banc de tests", always: true },
+  { id: "intrusion", label: "Console d'intrusion", always: true },
+  { id: "archi", label: "Production & limites", always: true }
+];
+function buildNav() {
+  const nav = $("#topnav"); nav.innerHTML = "";
+  if (!SESSION.token) { nav.innerHTML = `<button class="on" data-tab="login">Connexion</button>`; $$("#topnav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab))); return; }
+  const vis = TABS.filter(t => t.always || (t.perm && SESSION.perms.includes(t.perm) && (!t.ownOnly || SESSION.user.matricule)));
+  nav.innerHTML = vis.map((t, i) => `<button data-tab="${t.id}"${i === 0 ? ` class="on"` : ``}>${t.label}</button>`).join("");
+  $$("#topnav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+  showTab(vis[0].id);
+}
+function showTab(id) {
+  $$(".tab").forEach(v => v.classList.remove("on"));
+  const el = $("#v-" + id); if (el) el.classList.add("on");
+  $$("#topnav button").forEach(b => b.classList.toggle("on", b.dataset.tab === id));
+  window.scrollTo({ top: 0 });
+  if (id === "cotis") renderCotis();
+  if (id === "journal") renderJournal();
+  if (id === "synthese") renderSynthese();
+  if (id === "situation") openSituation(SESSION.user.matricule, true);
+  if (id === "intrusion") renderAttacks();
+  if (id === "audit") renderAuditMaybe();
+  if (id === "archi") renderArchi();
+}
+
+/* ── Cotisations et recouvrements ── */
+let COTIS = { rows: [], parTribu: {}, summary: null, members: [] };
+async function renderCotis() {
+  const [rRec, rSum] = await Promise.all([
+    SERVER.api({ endpoint: "finance.recoveries", token: SESSION.token }),
+    SERVER.api({ endpoint: "finance.summary", token: SESSION.token, body: { annee: 2026 } })
+  ]);
+  if (rRec.status !== 200) { doLogout(true); return; }
+  COTIS.rows = rRec.data.rows; COTIS.parTribu = rRec.data.parTribu; COTIS.summary = rSum.data;
+  const canPay = SESSION.perms.includes("finance.create");
+  $("#btn-pay-open").style.display = canPay ? "" : "none";
+  $("#cotis-sub").textContent = canPay
+    ? "Le trésorier encaisse et corrige ; tout est vérifié et tracé côté serveur. Les mois dus sont calculés depuis le journal : de la date d'adhésion au mois courant, moins les mois réglés."
+    : "Lecture selon votre rôle : l'encaissement et les corrections sont réservés au trésorier (vérifié côté serveur à chaque appel).";
+  const nov = COTIS.summary.rows.find(x => x.mois === SERVER.PERIODE_COURANTE);
+  $("#k-dus").textContent = COTIS.rows.reduce((s, r) => s + r.moisDus.length, 0);
+  $("#k-enc").textContent = fc(nov.encaisse);
+  $("#k-taux").textContent = nov.taux + " %";
+  $("#k-ecrit").textContent = COTIS.summary.nbEcritures;
+  drawCotisTable();
+  if (!COTIS.members.length) {
+    const rM = await SERVER.api({ endpoint: "members.list", token: SESSION.token });
+    if (rM.status === 200) {
+      COTIS.members = rM.data;
+      const sel = $("#pay-mat"), jl = $("#jl-mat");
+      COTIS.members.forEach(m => {
+        sel.insertAdjacentHTML("beforeend", `<option value="${m.matricule}">${m.matricule} — ${m.nom} ${m.prenom}</option>`);
+        jl.insertAdjacentHTML("beforeend", `<option value="${m.matricule}">${m.matricule}</option>`);
+      });
+      const selT = $("#fin-tribu");
+      SERVER.TRIBUS.forEach(t => selT.insertAdjacentHTML("beforeend", `<option value="${t}">${t}</option>`));
+    }
+  }
+}
+function drawCotisTable() {
+  const q = norm2($("#fin-q").value), tribu = $("#fin-tribu").value, dus = $("#fin-dus").value;
+  let rows = COTIS.rows.filter(r => (!q || norm2(r.nom + " " + r.prenom).includes(q) || r.matricule.toLowerCase().includes(q)) && (!tribu || r.tribu === tribu) && (!dus || (dus === "dus" ? r.moisDus.length > 0 : r.moisDus.length === 0)));
+  $("#cotis-tbl tbody").innerHTML = rows.map(r => `<tr>
+    <td data-l="Membre"><div class="cell-name"><span class="ava">${initials(r.prenom + " " + r.nom)}</span><span class="n"><b>${esc(r.nom + " " + r.prenom)}</b><small>${esc(r.date_adhesion || "")}</small></span></div></td>
+    <td data-l="Matricule"><span class="mat">${esc(r.matricule)}</span></td>
+    <td data-l="Tribu">${esc(r.tribu)}</td>
+    <td data-l="Statut"><span class="tag ${r.statut === "actif" ? "ok" : "bad"}">${r.statut === "actif" ? "Actif" : "Inactif"}</span></td>
+    <td data-l="Mois dus">${r.moisDus.length ? `<span class="tag warn">${r.moisDus.length} mois</span> <small style="color:var(--ink-3);font-family:var(--f-num)">${r.moisDus.join(", ")}</small>` : `<span class="tag ok">À jour</span>`}</td>
+    <td data-l="Total réglé" class="num">${fc(r.totalPaye)}</td>
+    <td class="act"><button class="btn ghost sm" data-sit="${r.matricule}">Situation</button></td></tr>`).join("");
+  $$("#cotis-tbl [data-sit]").forEach(b => b.addEventListener("click", () => { SIT_BACK = "cotis"; openSituation(b.dataset.sit); }));
+}
+const norm2 = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+/* ── Encaissement ── */
+async function submitPay() {
+  const body = { matricule: $("#pay-mat").value, mois: $("#pay-mois").value, montant: Number($("#pay-montant").value), mode: $("#pay-mode").value };
+  let ok = true;
+  [["f-pay-mat", body.matricule], ["f-pay-mois", body.mois], ["f-pay-montant", body.montant > 0]].forEach(([f, v]) => { $("#" + f).classList.toggle("err", !v); if (!v) ok = false; });
+  if (!ok) return;
+  const r = await SERVER.api({ endpoint: "finance.pay", token: SESSION.token, body });
+  $("#pay-result").innerHTML = `<div class="note ${r.status === 200 ? "ok" : "err"}"><span>${r.status === 200 ? "✓" : "⚠️"}</span><span><b>${esc(r.msg)}</b>${r.auditId ? ` (journal n° ${r.auditId})` : ""}</span></div>`;
+  if (r.status === 200) { toast("ok", r.msg.slice(0, 120)); renderCotis(); }
+  else toast("err", r.msg.slice(0, 120));
+}
+
+/* ── Situation d'un membre ── */
+let SIT_BACK = "cotis";
+async function openSituation(matricule, ownMode) {
+  const r = await SERVER.api({ endpoint: "finance.state", token: SESSION.token, body: { matricule } });
+  if (r.status !== 200) { toast("err", r.msg); if (ownMode) $("#sit-infos").innerHTML = `<p style="color:var(--ink-3)">Aucune fiche membre n'est liée à ce compte de gestion — le bureau gère les cotisations des adhérents.</p>`; return; }
+  const d = r.data;
+  $("#sit-title").textContent = "Situation de " + d.matricule;
+  $("#sit-infos").innerHTML = `<dl class="dl">
+    <dt>Nom</dt><dd><b>${esc(d.nom + " " + d.prenom)}</b> ${d.statut === "inactif" ? `<span class="tag bad">Inactif — cotisations restantes dues</span>` : ""}</dd>
+    <dt>Tribu</dt><dd>${esc(d.tribu)}</dd>
+    <dt>Adhésion</dt><dd>${esc(d.date_adhesion)}</dd>
+    <dt>Mois réglés</dt><dd><b>${d.moisRegle}</b></dd>
+    <dt>Mois dus</dt><dd><b style="color:${d.moisDus.length ? "var(--warn)" : "var(--ok)"}">${d.moisDus.length || "aucun"}</b></dd>
+    <dt>Total réglé</dt><dd>${fc(d.totalPaye)}</dd>
+    <dt>Corrections</dt><dd>${d.totalAnnule ? fc(d.totalAnnule) + " contre-passées" : "aucune"}</dd></dl>
+    ${d.moisDus.length ? `<div class="note warn" style="margin-top:10px"><span>⚠️</span><span><b>Mois restants dus : ${d.moisDus.join(", ")}</b> — les obligations déjà enregistrées restent dues même pour un membre inactif.</span></div>` : `<div class="note ok" style="margin-top:10px"><span>✓</span><span><b>Cotisations à jour.</b></span></div>`}`;
+  let chips = "";
+  for (let y = 2025; y <= 2026; y++) { let yearChips = ""; for (let m = 1; m <= 12; m++) { const ym = y + "-" + String(m).padStart(2, "0"); const paid = !d.moisDus.includes(ym) && new Date(y, m - 1) >= new Date(2025, 0) && ym <= SERVER.PERIODE_COURANTE && ym >= d.date_adhesion.slice(0, 7); if (ym < d.date_adhesion.slice(0, 7) || ym > SERVER.PERIODE_COURANTE) continue; yearChips += `<span class="mois-chip ${paid ? "paye" : "du"}">${ym}</span>`; } if (yearChips) chips += `<div style="margin-bottom:6px"><b style="font-size:12px;color:var(--ink-3)">${y}</b><br>${yearChips}</div>`; }
+  $("#sit-mois").innerHTML = chips;
+  showTabTab("situation");
+  const lg = await SERVER.api({ endpoint: "finance.ledger", token: SESSION.token, body: { matricule } });
+  const annules = new Set(lg.status === 200 ? lg.data.filter(e => e.type === "contrepassation").map(e => e.annule) : []);
+  $("#sit-tbl tbody").innerHTML = lg.status === 200 && lg.data.length ? lg.data.map(e => `<tr>
+    <td data-l="N°" class="num">${e.no}</td><td data-l="Quand">${esc(e.ts)}</td>
+    <td data-l="Type"><span class="tag ${e.type === "paiement" ? "ok" : "bad"}">${e.type === "paiement" ? "Paiement" : "Contre-passation"}</span></td>
+    <td data-l="Mois">${esc(e.mois)}</td><td data-l="Montant" class="num" style="color:${e.montant < 0 ? "var(--danger)" : "var(--ok)"}">${fc(e.montant)}</td>
+    <td data-l="Détail">${esc(e.ref ? "reçu " + e.ref : e.motif ? "motif : " + e.motif : "")}</td></tr>`).join("") : `<tr><td colspan="6" style="color:var(--ink-3)">Aucune écriture pour ce matricule.</td></tr>`;
+}
+function showTabTab(id) { $$(".tab").forEach(v => v.classList.remove("on")); $("#v-" + id).classList.add("on"); $$("#topnav button").forEach(b => b.classList.toggle("on", b.dataset.tab === id)); }
+
+/* ── Journal financier ── */
+async function renderJournal() {
+  if (!SESSION.perms.includes("finance.view_all")) return;
+  const r = await SERVER.api({ endpoint: "finance.ledger", token: SESSION.token });
+  if (r.status !== 200) return;
+  const annules = new Set(r.data.filter(e => e.type === "contrepassation").map(e => e.annule));
+  const mat = $("#jl-mat").value, type = $("#jl-type").value, mois = $("#jl-mois").value;
+  const rows = r.data.filter(e => (!mat || e.matricule === mat) && (!type || e.type === type) && (!mois || e.mois === mois)).slice(-120).reverse();
+  const canRev = SESSION.perms.includes("finance.reverse");
+  $("#jl-tbl tbody").innerHTML = rows.map(e => `<tr>
+    <td data-l="N°" class="num">${e.no}</td><td data-l="Quand">${esc(e.ts)}</td><td data-l="Auteur">${esc(e.actor)}</td>
+    <td data-l="Type"><span class="tag ${e.type === "paiement" ? "ok" : "bad"}">${e.type === "paiement" ? "Paiement" : "Contre-passation"}</span></td>
+    <td data-l="Matricule"><span class="mat">${esc(e.matricule)}</span></td>
+    <td data-l="Mois">${esc(e.mois)}</td>
+    <td data-l="Montant" class="num" style="color:${e.montant < 0 ? "var(--danger)" : "var(--ok)"}">${fc(e.montant)}</td>
+    <td data-l="Détail">${esc(e.ref ? "reçu " + e.ref : e.motif ? "motif : " + e.motif : "")}${annules.has(e.no) ? ` <span class="tag bad">annulée</span>` : ""}</td>
+    <td class="act">${canRev && e.type === "paiement" && !annules.has(e.no) ? `<button class="btn danger sm" data-rev="${e.no}">Annuler</button>` : ""}</td></tr>`).join("");
+  $$("#jl-tbl [data-rev]").forEach(b => b.addEventListener("click", async () => {
+    const motif = prompt("Motif de la contre-passation (minimum 10 caractères — l'écriture d'origine restera visible au journal) :") || "";
+    if (!motif) { toast("err", "Contre-passation annulée : un motif est nécessaire."); return; }
+    const rr = await SERVER.api({ endpoint: "finance.reverse", token: SESSION.token, body: { no: +b.dataset.rev, motif } });
+    toast(rr.status === 200 ? "ok" : "err", rr.msg.slice(0, 140));
+    renderJournal();
+  }));
+}
+
+/* ── Synthèse ── */
+async function renderSynthese() {
+  const r = await SERVER.api({ endpoint: "finance.summary", token: SESSION.token, body: { annee: 2026 } });
+  if (r.status !== 200) return;
+  $("#k-sy-total").textContent = fc(r.data.total);
+  $("#k-sy-nb").textContent = r.data.nbEcritures;
+  $("#k-sy-rev").textContent = r.data.rows.reduce((s, x) => s + x.ecritures, 0) ? (r.data.rows.reduce((s, x) => s + x.ecritures, 0) - r.data.rows.reduce((s, x) => s + x.regles, 0)) : 0;
+  $("#sy-tbl tbody").innerHTML = r.data.rows.map(x => `<tr>
+    <td data-l="Mois"><b>${x.mois}</b>${x.futur ? ` <span class="tag neutral">à venir</span>` : ""}</td>
+    <td data-l="Mois dus" class="num">${x.dus}</td>
+    <td data-l="Mois réglés" class="num">${x.regles}</td>
+    <td data-l="Taux"><span class="tag ${x.taux >= 90 ? "ok" : x.taux >= 70 ? "warn" : x.dus ? "bad" : "neutral"}">${x.dus ? x.taux + " %" : "—"}</span></td>
+    <td data-l="Encaissé" class="num">${fc(x.encaisse)}</td>
+    <td data-l="Écritures" class="num">${x.ecritures}</td></tr>`).join("");
+}
+
+/* ── Export ── */
+async function exportFinCSV() {
+  const r = await SERVER.api({ endpoint: "finance.recoveries", token: SESSION.token });
+  /* Neutralisation de l'injection de formules tableur (=, +, @, tabulation, RC). */
+  const safe = v => { const s = String(v == null ? "" : v); return (/^[=+@\t\r]/.test(s) || /^-[^0-9.]/.test(s)) ? "'" + s : s; };
+  const q = v => `"${safe(v).replace(/"/g, `""`)}"`;
+  const lines = ["Nom;Prénom;Matricule;Tribu;Statut;Mois dus;Mois réglés;Total réglé (FCFA)"]
+    .concat(r.data.rows.map(m => [m.nom, m.prenom, m.matricule, m.tribu, m.statut, m.moisDus.length, m.moisRegle, m.totalPaye].map(q).join(";")));
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "adl-ci_cotisations.csv"; a.click();
+  toast("ok", "Export tableur : " + r.data.rows.length + " membres — sous-ensemble autorisé.");
+}
+
+/* ── Journal d'audit, banc, intrusion, archi ── */
+async function renderAuditMaybe() {
+  if (!SESSION.perms.includes("audit.view")) return;
+  const r = await SERVER.api({ endpoint: "audit.list", token: SESSION.token });
+  $("#audit-tbl tbody").innerHTML = (r.data || []).slice(-70).reverse().map(e => `<tr>
+    <td data-l="#">${e.seq}</td><td data-l='Horodatage'>${esc(e.ts)}</td>
+    <td data-l="Auteur">${esc(e.actor)} <small style="color:var(--ink-3)">${esc(e.role)}</small></td>
+    <td data-l="Action"><b style="font-size:12px">${esc(e.action)}</b></td>
+    <td data-l="Détail">${esc(e.detail)}</td>
+    <td data-l="Niveau"><span class="tag ${e.level === "BLOCAGE" ? "bad" : e.level === "ALERTE" ? "warn" : "neutral"}">${e.level}</span></td></tr>`).join("");
+  $("#btn-audit-verify").onclick = async () => {
+    const v = await SERVER.api({ endpoint: "audit.verify", token: SESSION.token });
+    $("#audit-verify-result").innerHTML = `<div class="note ${v.data.integre ? "ok" : "err"}"><span>${v.data.integre ? "✓" : "⚠️"}</span><span><b>${esc(v.msg)}</b> ${esc(v.data.motif || "")}</span></div>`;
+    toast(v.data.integre ? "ok" : "err", v.msg);
+  };
+}
+function renderBench(out, pass, total, ms) {
+  $("#bs-total").textContent = total; $("#bs-pass").textContent = pass; $("#bs-fail").textContent = total - pass; $("#bs-time").textContent = ms + " ms";
+  const GROUPS = { 1: "G1 — Encaissements", 2: "G2 — Consultation et filtres", 3: "G3 — Corrections et immutabilité", 4: "G4 — Recouvrements et synthèse", 5: "G5 — Sécurité transversale" };
+  let html = "";
+  for (const g of [1, 2, 3, 4, 5]) {
+    html += `<div class="grp-h">${GROUPS[g]}</div>`;
+    for (const sc of out.filter(x => x.g === g)) {
+      html += `<details class="sc"><summary><span class="verdict ${sc.pass ? "p" : "f"}">${sc.pass ? "✓ PASS" : "✗ ÉCART"}</span><b>${sc.id} · ${esc(sc.titre)}</b></summary>
+        <div class="body"><b>Attendu :</b> ${esc(sc.attendu)}<br><b>Obtenu :</b> ${esc(sc.obtenu)}${sc.detail ? `<br>${esc(sc.detail)}` : ""}</div></details>`;
+    }
+  }
+  html += `<div class="note ${pass === total ? "ok" : "err"}" style="margin-top:14px"><span>${pass === total ? "✓" : "⚠️"}</span><span><b>${pass === total ? "Suite complète conforme : " + pass + "/" + total + " scénarios." : pass + "/" + total + " scénarios conformes — examinez les écarts."}</b> Les données fictives ont été réinitialisées après l'exécution.</span></div>`;
+  $("#bench-results").innerHTML = html;
+}
+function renderAttacks() {
+  $("#attacks").innerHTML = ATTACKS.map((a, i) => `<div class="attack"><div class="desc"><b>${i + 1} · ${esc(a.t)}</b><small>${esc(a.d)}</small></div><button class="btn danger sm" data-atk="${i}">Lancer l'attaque</button></div>`).join("");
+  $$("#attacks [data-atk]").forEach(b => b.addEventListener("click", async () => {
+    const a = ATTACKS[+b.dataset.atk];
+    const r = await a.run();
+    const cls = r.status >= 500 ? "g" : r.status >= 400 ? "r" : "k";
+    $("#console-out").innerHTML += `\n\n<span class='g'>» ${esc(a.t)}</span>\n<span class='${cls}'>HTTP ${r.status} · ${esc(r.code)}</span>\n<span class='k'>Serveur :</span> ${esc(r.msg)}${r.auditId ? `\n<span class='g'>Journal :</span> entrée n° ${r.auditId}` : ""}`;
+    $("#console-out").scrollTop = 1e9;
+    toast(r.status >= 400 ? "ok" : "warn", r.status >= 400 ? `Refus du serveur (HTTP ${r.status}) — journal n° ${r.auditId}.` : `Réponse reçue (HTTP ${r.status}).`);
+  }));
+}
+function renderArchi() {
+  const MAP = [
+    ["Écriture référencée au matricule du registre", "Clé étrangère PostgreSQL vers la table members — impossible de saisir un paiement hors registre", "FOREIGN KEY NOT NULL"],
+    ["Un mois = un paiement, doublon refusé", "Contrainte d'unicité partielle (matricule, mois) sur les paiements valides", "UNIQUE + index partiel"],
+    ["Journal immuable, correction par écriture inverse", "Table ledger INSERT-only + déclencheur anti-UPDATE/DELETE ; contre-passation référencée", "REVOKE UPDATE/DELETE"],
+    ["Permissions vérifiées à chaque appel", "Middleware Express requirePerm() ; encaissement et contre-passation au rôle trésorier", "Aucune route sans middleware"],
+    ["Mois bornés par l'adhésion et la période courante", "Validation métier dans la route + CHECK en base", "CHECK sur la plage de mois"],
+    ["Journal d'audit chaîné SHA-256", "Table audit append-only + export mensuel hors système (RG-X5)", "REVOKE UPDATE/DELETE sur audit_log"],
+    ["Recouvrements et synthèse recalculés", "Vues PostgreSQL matérialisées recalculées à l'écriture", "Aucun chiffre saisi à la main"],
+    ["Export tableur du sous-ensemble autorisé", "Génération côté serveur (CSV/Excel) avec la même permission", "L'export suit la permission"]
+  ];
+  $("#map-body").innerHTML = MAP.map(m => `<tr><td data-l='Prototype'>${esc(m[0])}</td><td data-l="Production">${esc(m[1])}</td><td data-l="Verrou">${esc(m[2])}</td></tr>`).join("");
+  const FLAWS = [
+    ["1", "Le « serveur » vit dans le navigateur : la séparation client-serveur est une simulation fidèle mais non opposable hors du navigateur.", "Serveur distant Node.js + Express (AT-1) ; le prototype reste la spécification de référence."],
+    ["2", "Le montant mensuel (1 000 FCFA) et la période courante (2026-11) sont des valeurs de démonstration figées.", "En production : montant voté en assemblée, stocké et versionné ; période calculée sur l'horloge du serveur."],
+    ["3", "L'encaissement couvre exactement un mois ; les paiements groupés de plusieurs mois exigent plusieurs écritures.", "En production : même modèle (une écriture par mois) — la lisibilité du journal passe avant la concision, ou paiement groupé tracé en N écritures liées."],
+    ["4", "Le journal et le registre sont en mémoire : tout se perd à l'actualisation.", "Tables PostgreSQL + sauvegardes quotidiennes (30 jours) + export mensuel hors système."],
+    ["5", "Les modes de paiement (espèces, mobile money, virement) ne vérifient pas encore une référence de transaction réelle.", "En production : référence de transaction vérifiée auprès de l'opérateur (API) ou du relevé bancaire avant validation."]
+  ];
+  $("#flaws-body").innerHTML = FLAWS.map(f => `<tr><td data-l='#'>${f[0]}</td><td data-l="Constat">${esc(f[1])}</td><td data-l="Traitement">${esc(f[2])}</td></tr>`).join("");
+  $("#rules-list").innerHTML = [
+    "Chaque écriture référence un matricule existant du registre — jamais un nom libre (clé étrangère en production).",
+    "Un mois se paie une seule fois : le doublon est refusé (409) ; la correction passe par la contre-passation.",
+    "Le journal ne s'efface ni ne se réécrit : aucune route de modification ou de suppression n'existe.",
+    "Contre-passation = écriture inverse tracée, motif obligatoire (10 caractères minimum), original toujours visible.",
+    "Les obligations déjà enregistrées restent dues : un membre inactif garde ses mois dus visibles.",
+    "Le trésorier encaisse et corrige ; le bureau consulte ; un membre ne voit que sa situation (RG-X2, RG-X3)."
+  ].map(t => `<div style="display:flex;gap:9px"><span style="color:var(--primary);font-weight:700">§</span><span>${esc(t)}</span></div>`).join("");
+}
+
+/* ── Connexion / déconnexion ── */
+function lgErr(msg) { $("#lg-err-txt").textContent = msg; $("#lg-err").classList.add("on"); }
+$("#login-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("#lg-err").classList.remove("on");
+  const u = $("#lg-user").value.trim(), p = $("#lg-pass").value;
+  if (!u) { $("#f-lg-user").classList.add("err"); return; }
+  if (!p) { $("#f-lg-pass").classList.add("err"); return; }
+  const b = $("#lg-submit"); b.classList.add("busy"); b.disabled = true;
+  const r = await SERVER.api({ endpoint: "auth.login", body: { user: u, pass: p } });
+  b.classList.remove("busy"); b.disabled = false;
+  if (r.status !== 200) { lgErr(r.msg); return; }
+  SESSION = { token: r.data.token, user: r.data.user, perms: r.data.perms };
+  $("#top-who").style.display = "flex";
+  $("#top-name").textContent = SESSION.user.nom; $("#top-role").textContent = SESSION.user.roleLabel; $("#top-ava").textContent = initials(SESSION.user.nom);
+  $("#v-login").classList.remove("on"); $("#v-appzone").style.display = "block";
+  $("#lg-pass").value = "";
+  COTIS = { rows: [], parTribu: {}, summary: null, members: [] };
+  buildNav();
+  toast("ok", r.msg);
+});
+async function doLogout(expired, silent) {
+  if (SESSION.token && !expired) await SERVER.api({ endpoint: "auth.logout", token: SESSION.token });
+  SESSION = { token: null, user: null, perms: [] };
+  $("#top-who").style.display = "none"; $("#v-appzone").style.display = "none"; $("#v-login").classList.add("on");
+  buildNav();
+  if (!silent) toast("info", expired ? "Votre session a expiré — reconnectez-vous." : "Session fermée. À bientôt !");
+}
+$("#btn-logout").addEventListener("click", () => doLogout(false));
+$("#btn-pay-open").addEventListener("click", () => { $("#panel-pay").style.display = "block"; $("#btn-pay-open").style.display = "none"; });
+$("#btn-pay-close").addEventListener("click", () => { $("#panel-pay").style.display = "none"; $("#btn-pay-open").style.display = ""; });
+$("#btn-pay-submit").addEventListener("click", submitPay);
+$("#btn-export-fin").addEventListener("click", exportFinCSV);
+$("#btn-sit-back").addEventListener("click", () => showTabTab(SIT_BACK));
+$("#fin-q").addEventListener("input", () => { clearTimeout(window.__ft); window.__ft = setTimeout(drawCotisTable, 300); });
+$("#fin-tribu").addEventListener("change", drawCotisTable);
+$("#fin-dus").addEventListener("change", drawCotisTable);
+["jl-mat", "jl-type", "jl-mois"].forEach(id => $("#" + id).addEventListener("change", renderJournal));
+$("#btn-bench-run").addEventListener("click", () => { $("#bench-results").innerHTML = `<div class="note info"><span>⏳</span><span>Suite en cours — quelques secondes (dérivations PBKDF2 incluses)…</span></div>`; setTimeout(runBench, 50); });
+$("#btn-bench-export").addEventListener("click", () => {
+  if (!BENCH_RESULTS.length) { toast("err", "Lancez d'abord la suite de tests."); return; }
+  const blob = new Blob([JSON.stringify(BENCH_RESULTS, null, 2)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "adl-ci_tests_module_financier.json"; a.click();
+});
+$("#btn-console-clear").addEventListener("click", () => { $("#console-out").textContent = "Console effacée."; });
+
+/* ── Amorçage ── */
+(async () => {
+  await SERVER.seed();
+  buildNav();
+  showTab("login");
+  renderAttacks(); renderArchi();
+})();
+
+</script>
+
+</body>
+</html>
