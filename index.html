@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADL-CI Gestion — Démonstration en ligne</title>
+<style>
+  :root{--bg:#f2f2f1;--ink:#22211f;--muted:#898780;--line:#d8d3c4;--card:#ffffff;
+        --accent:#92751f;--mid:#686048;--danger:#9e514a;--ok:#3d8455;--warnbg:#f6efe0;--warnline:#dfc98f}
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,-apple-system,Arial,sans-serif;background:var(--bg);
+       color:var(--ink);line-height:1.55}
+  .wrap{max-width:1080px;margin:0 auto;padding:clamp(16px,4vw,40px)}
+  header{border-bottom:3px solid var(--accent);padding-bottom:14px;margin-bottom:18px}
+  h1{font-size:clamp(1.45rem,5vw,2.3rem);margin:0 0 4px;letter-spacing:-.01em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--muted);font-size:clamp(.88rem,2.5vw,1.02rem);margin:0}
+  .notice{background:var(--warnbg);border:1px solid var(--warnline);border-radius:12px;
+          padding:14px 16px;font-size:clamp(.85rem,2.4vw,.95rem);margin:18px 0 26px}
+  .notice b{color:#8a5b16}
+  .notice ul{margin:8px 0 0;padding-left:20px}
+  .notice li{margin:4px 0}
+  h2.sec{font-size:clamp(1.1rem,3.4vw,1.4rem);color:var(--mid);margin:30px 0 12px;
+         border-left:4px solid var(--accent);padding-left:10px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;
+        display:flex;flex-direction:column;gap:9px}
+  .card h3{font-size:1rem;margin:0}
+  .card p{margin:0;font-size:.86rem;color:#4a483f;flex:1}
+  .tag{display:inline-block;font-size:.7rem;letter-spacing:.07em;text-transform:uppercase;
+       color:var(--muted)}
+  .compte{font-size:.76rem;color:#5d5b52;background:var(--bg);border:1px dashed var(--line);
+          border-radius:8px;padding:6px 8px;font-family:ui-monospace,Consolas,monospace;word-break:break-word}
+  .btn{display:inline-block;background:var(--accent);color:#fff;text-decoration:none;
+       padding:9px 14px;border-radius:9px;font-weight:600;font-size:.9rem;text-align:center}
+  .btn:hover{background:var(--mid)}
+  .tblwrap{overflow-x:auto;border-radius:12px}
+  table{border-collapse:collapse;width:100%;min-width:520px;background:#fff;border:1px solid var(--line)}
+  th{background:var(--mid);color:#fff;text-align:left;font-size:.85rem}
+  th,td{padding:9px 12px;border-bottom:1px solid var(--line);font-size:.88rem;vertical-align:top}
+  tr:nth-child(even) td{background:#f7f7f5}
+  code{background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:1px 5px;
+       font-size:.85em;font-family:ui-monospace,Consolas,monospace;word-break:break-word}
+  ul.limits li{margin:7px 0;font-size:.93rem}
+  .ok{color:var(--ok);font-weight:600}
+  .no{color:var(--danger);font-weight:600}
+  footer{margin-top:36px;color:var(--muted);font-size:.82rem;border-top:1px solid var(--line);
+         padding-top:12px}
+  @media (max-width:640px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ADL-CI <span class="accent">GESTION</span> — Démonstration en ligne</h1>
+    <p class="sub">Association pour le Développement de Laabha — Section Côte d'Ivoire · Système de gestion du bureau</p>
+  </header>
+
+  <div class="notice">
+    <b>Environnement de démonstration — lire avant utilisation.</b>
+    <ul>
+      <li>Les données sont <b>fictives</b> et vivent <b>en mémoire dans votre navigateur</b> : chaque visite repart d'un jeu d'essai, rien n'est conservé ni partagé entre les visiteurs.</li>
+      <li>Les comptes ci-dessous sont <b>des comptes de démonstration publics</b> — ils ne doivent jamais servir pour un usage réel.</li>
+      <li>Conformément au <b>rapport d'audit du 25/11/2026</b> (verdict : non-prêt pour la production réelle), cette mise en ligne sert au <b>pilote et à la formation</b> ; l'usage réel exige : sauvegarde/restauration côté serveur, serveur de production réel, arbitrage des 19 décisions métier, comptes nominatifs.</li>
+    </ul>
+  </div>
+
+  <h2 class="sec">Modules de démonstration</h2>
+  <div class="grid">
+    <div class="card">
+      <span class="tag">Pièce 6d</span>
+      <h3>Interface professionnelle</h3>
+      <p>Vue consolidée de bureau : tableaux de bord par rôle, navigation type application. Maquette d'ergonomie (l'export y est simulé).</p>
+      <span class="compte">sélecteur de rôle intégré (trésorier, membre…)</span>
+      <a class="btn" href="ADL-CI_Gestion_Interface_Pro_v1.0.html">Ouvrir le module</a>
+    </div>
+    <div class="card">
+      <span class="tag">Pièce 6e</span>
+      <h3>Authentification &amp; sécurité</h3>
+      <p>Connexions des rôles, journal d'audit chaîné par empreinte SHA-256, blocage des intrusions, politique des mots de passe.</p>
+      <span class="compte">admin : s.diallo / Admin-2026!CI</span>
+      <a class="btn" href="ADL-CI_Gestion_Authentification_Securite_v1.0.html">Ouvrir le module</a>
+    </div>
+    <div class="card">
+      <span class="tag">Pièce 6f</span>
+      <h3>Registre des membres</h3>
+      <p>Adhésions, matricules ADLCI-AAAA-NNNN, fiche individuelle, historique, statuts — aucune suppression définitive.</p>
+      <span class="compte">secrétaire : f.cisse / Secretariat-2026!</span>
+      <a class="btn" href="ADL-CI_Gestion_Membres_v1.0.html">Ouvrir le module</a>
+    </div>
+    <div class="card">
+      <span class="tag">Pièce 6g</span>
+      <h3>Finances — cotisations</h3>
+      <p>Suivi des mois dus et réglés, identification des retards, exports tableur filtrés.</p>
+      <span class="compte">trésorière : a.traore / Tresor-2026!CI</span>
+      <a class="btn" href="ADL-CI_Gestion_Finances_v1.0.html">Ouvrir le module</a>
+    </div>
+    <div class="card">
+      <span class="tag">Pièce 6h</span>
+      <h3>Finances comptables v2</h3>
+      <p>Imputation RG-C3 (mois ancien → pénalité → mois suivant), avances plafonnées, dépenses par catégorie, état financier et trésorerie.</p>
+      <span class="compte">trésorière : a.traore / Tresor-2026!CI</span>
+      <a class="btn" href="ADL-CI_Gestion_Finances_Comptabilite_v2.0.html">Ouvrir le module</a>
+    </div>
+    <div class="card">
+      <span class="tag">Pièce 6i</span>
+      <h3>Réunions &amp; activités</h3>
+      <p>Événements, feuilles de présence à 4 statuts, corrections historisées, statistiques de participation, générateur du 15 du mois.</p>
+      <span class="compte">secrétaire général : f.cisse / Secretariat-2026!</span>
+      <a class="btn" href="ADL-CI_Gestion_Reunions_Activites_v1.0.html">Ouvrir le module</a>
+    </div>
+    <div class="card">
+      <span class="tag">Pièce 6j</span>
+      <h3>Engagement &amp; distinctions</h3>
+      <p>Scores 40/30/30, classements général et par tribu, badges Or/Argent/Bronze, certificats imprimables.</p>
+      <span class="compte">présidente pré-remplie · membre : k.yao / Membre-2026!CI</span>
+      <a class="btn" href="ADL-CI_Gestion_Engagement_Distinctions_v1.0.html">Ouvrir le module</a>
+    </div>
+    <div class="card">
+      <span class="tag">Pièce 6k</span>
+      <h3>Fonctionnement hors ligne</h3>
+      <p>Démonstration du mécanisme PWA : saisie réseau coupé, file d'attente locale, synchronisation FIFO idempotente, conflits arbitrés.</p>
+      <span class="compte">démonstration sans compte</span>
+      <a class="btn" href="ADL-CI_Gestion_Hors_Ligne_v1.0.html">Ouvrir le module</a>
+    </div>
+  </div>
+
+  <h2 class="sec">Comptes de démonstration</h2>
+  <div class="tblwrap">
+    <table>
+      <thead><tr><th>Identifiant</th><th>Mot de passe</th><th>Rôle</th><th>Portée</th></tr></thead>
+      <tbody>
+        <tr><td><code>s.diallo</code></td><td><code>Admin-2026!CI</code></td><td>Administrateur</td><td>Tous les modules + arbitrage des conflits</td></tr>
+        <tr><td><code>a.traore</code></td><td><code>Tresor-2026!CI</code></td><td>Trésorière</td><td>Finances v1 et v2, encaissements, dépenses</td></tr>
+        <tr><td><code>f.cisse</code></td><td><code>Secretariat-2026!</code></td><td>Secrétaire</td><td>Registre des membres, réunions et présences</td></tr>
+        <tr><td><code>k.yao</code></td><td><code>Membre-2026!CI</code></td><td>Membre</td><td>Lecture de sa fiche et de son score uniquement</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="sec">Limites connues de cette démonstration</h2>
+  <ul class="limits">
+    <li><span class="no">Persistance :</span> aucune — les saisies disparaissent au rechargement de la page. C'est le point critique R1 de l'audit.</li>
+    <li><span class="no">Multi-utilisateur :</span> aucun — chaque visiteur dispose de son propre jeu de données en mémoire ; deux trésoriers ne voient jamais la même base.</li>
+    <li><span class="no">Sauvegarde :</span> aucune — la procédure C1 de l'audit (sauvegarde + restauration testée) reste à implémenter côté serveur.</li>
+    <li><span class="ok">Fonctionnel :</span> tous les calculs métier testés lors de l'audit (imputation, pénalités, scores, classements, hors ligne) sont réels dans ces démonstrations.</li>
+    <li><span class="ok">Responsive :</span> testé à 375 px (téléphone) et 1280 px (ordinateur) sur les huit modules.</li>
+  </ul>
+
+  <footer>
+    ADL-CI — Association pour le Développement de Laabha, Section Côte d'Ivoire ·
+    Bundle de démonstration v1.0 · 25 novembre 2026 ·
+    Usage réel : se référer au rapport d'audit (conditions C1-C5) et au protocole de pilote (pièce 6c).
+  </footer>
+</div>
+</body>
+</html>
